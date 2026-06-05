@@ -72,6 +72,7 @@ node dist/src/cli/index.js proxy --config warden.yaml
 - Doctor flags exposed protected environment variables as monitoring-only.
 - `warden inspect` initializes configured upstreams and prints namespaced tools, descriptions, risk labels, and policy decisions.
 - `pnpm run compat:clients` verifies Warden MCP registration with installed Codex and Claude Code CLIs using temporary config.
+- Codex CLI `0.137.0` can call the allowed fake read tool through `warden proxy` in an ephemeral model-driven session.
 - `warden proxy` can initialize, list namespaced upstream tools, route allowed calls, block policy-denied calls, and execute approval-required calls after terminal side-channel approval.
 - `warden proxy` still fails closed on approval-required calls when no terminal side channel is available.
 
@@ -79,15 +80,16 @@ node dist/src/cli/index.js proxy --config warden.yaml
 
 - `warden exec`
 - containerized sandboxing
-- model-driven Codex and Claude Code tool-call smoke tests
+- model-driven Claude Code tool-call smoke test
+- model-driven denied and approval-required client smoke tests
 - local web approval inbox
 - hosted team product
 
 ## Next Engineering Step
 
-Test model-driven Warden tool calls through Codex and Claude Code:
+Finish model-driven client smoke coverage:
 
-1. Use generated setup snippets or temp config to point each client at Warden.
-2. Ask each client to call an allowed fake read tool through Warden.
-3. Confirm denied and approval-required calls behave correctly.
+1. Authenticate Claude Code locally and confirm it can call the allowed fake read tool through Warden.
+2. Confirm denied calls behave correctly in Codex and Claude Code.
+3. Confirm approval-required calls behave correctly in Codex and Claude Code.
 4. Convert real compatibility failures into focused MCP gateway fixes.

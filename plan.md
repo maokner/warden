@@ -110,6 +110,7 @@ The product goal is to sit between a coding/workflow agent and real tools, class
 - CLI inspect tests against a fake upstream MCP process.
 - CLI proxy integration test that spawns `warden proxy`, talks MCP over stdio, proxies to a fake upstream process, allows read calls, blocks approval-required write calls without a reviewer, and executes approval-required calls after side-channel approval.
 - Client compatibility smoke script for Codex and Claude Code MCP registration using temporary config.
+- Manual model-driven Codex smoke verified an allowed read call through `warden proxy`.
 
 Current verification target:
 
@@ -120,13 +121,12 @@ pnpm run typecheck
 
 ## What Is Left
 
-### Immediate Next Milestone: Model-Driven Client Testing
+### Immediate Next Milestone: Finish Model-Driven Client Testing
 
-`warden inspect`, the fake MCP harness, and client registration smoke checks now cover the deterministic local path. The next useful milestone is testing actual model-driven Codex and Claude Code sessions that call Warden tools.
+`warden inspect`, the fake MCP harness, client registration smoke checks, and a model-driven Codex allowed-read smoke now cover the local Codex path. The next useful milestone is finishing model-driven Claude Code testing and exercising denied and approval-required calls through both clients.
 
 Expected behavior:
 
-- Codex can call an allowed Warden tool through `warden proxy`
 - Claude Code can call an allowed Warden tool through `warden proxy`
 - denied calls block with a structured policy response
 - approval-required calls pause for the `/dev/tty` reviewer and then execute or reject
@@ -207,8 +207,8 @@ Still needed:
 
 ## Recommended Build Order
 
-1. Test model-driven `warden proxy` tool calls through Codex.
-2. Test model-driven `warden proxy` tool calls through Claude Code.
+1. Test model-driven allowed read calls through Claude Code after local Claude auth is available.
+2. Test denied and approval-required model-driven calls through Codex and Claude Code.
 3. Improve doctor scans for user-level config and secrets.
 4. Add `warden exec` environment scrubber.
 5. Add local web approval/audit UI.

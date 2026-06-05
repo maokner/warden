@@ -28,6 +28,7 @@ Build the smallest useful version of Warden that can sit between Codex or Claude
 - terminal side-channel approval in `warden proxy`: built
 - tool inventory through `warden inspect`: built
 - Codex and Claude Code MCP registration smoke check: built
+- model-driven Codex allowed-read smoke check: built
 
 ### Out of Scope
 
@@ -124,7 +125,7 @@ Warden v0.1 is useful if a developer can:
 8. Review an audit log that explains what happened.
 9. Run `warden doctor` and see whether the setup is monitoring-only or enforced.
 
-Current gap: `warden proxy` still needs model-driven tool-call testing through real Codex and Claude Code sessions.
+Current gap: `warden proxy` still needs model-driven Claude Code testing plus denied and approval-required client smoke tests.
 
 ## Approval MVP
 

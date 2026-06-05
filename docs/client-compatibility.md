@@ -25,17 +25,26 @@ The current smoke check has passed with:
 - Codex CLI `0.137.0`
 - Claude Code `2.1.165`
 
+On June 5, 2026, a model-driven Codex smoke test also passed:
+
+- temporary Warden config pointed at the in-repo fake MCP upstream
+- Codex was launched with CLI-only MCP config overrides, `--ephemeral`, and `--ignore-user-config`
+- Codex called `warden/fixture.read_echo` through `warden proxy`
+- Warden wrote an audit event for `fixture.read_echo`
+- Codex returned `called:read_echo`
+
+Claude Code model-driven testing was attempted with `--mcp-config` and `--strict-mcp-config`, but the local Claude install was not logged in and returned `Not logged in`.
+
 ## Current Limit
 
-The smoke check validates client-side MCP registration and config discovery. It does not yet run a model-driven agent session that calls Warden tools through Codex or Claude Code.
+The automated smoke check validates client-side MCP registration and config discovery. It does not run model-driven agent sessions by default because those require authenticated clients and may spend model tokens.
 
 Claude Code project MCP servers appear as pending until approved interactively by the user. That is expected for project-scoped `.mcp.json` servers.
 
 ## Next Step
 
-Run an interactive client session against Warden and verify:
+Finish model-driven client testing:
 
-- the client sees Warden namespaced tools
-- an allowed read call executes through Warden
-- a denied call returns a structured block
-- an approval-required call pauses on the `/dev/tty` reviewer and executes only after approval
+- authenticate Claude Code locally and rerun the allowed read-tool smoke
+- verify denied calls return a structured block in Codex and Claude Code
+- verify approval-required calls pause on the `/dev/tty` reviewer and execute only after approval
