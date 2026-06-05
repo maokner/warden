@@ -95,4 +95,4 @@ Current behavior:
 
 Next step:
 
-- add `warden inspect` so developers can review upstream tool inventory, risk labels, and policy decisions before connecting an MCP client.
+- test the proxy against real Codex and Claude Code clients, then fill MCP compatibility gaps based on concrete failures.

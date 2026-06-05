@@ -16,6 +16,7 @@ The current codebase includes the local product core:
 - minimal stdio MCP gateway
 - stdio upstream MCP client
 - `/dev/tty` approval side channel for `warden proxy`
+- `warden inspect` upstream tool inventory with risk labels and policy decisions
 - basic `warden doctor`
 - Codex and Claude Code setup snippet generation
 - example policies and tool-call fixtures
@@ -42,6 +43,7 @@ node dist/src/cli/index.js policy test examples/calls/filesystem-write.json --co
 node dist/src/cli/index.js policy test examples/calls/stripe-refund.json --config examples/policies/warden.yaml --json
 node dist/src/cli/index.js audit tail
 node dist/src/cli/index.js doctor --json
+node dist/src/cli/index.js inspect --config warden.yaml
 node dist/src/cli/index.js setup codex --config examples/policies/warden.yaml
 node dist/src/cli/index.js setup claude --config examples/policies/warden.yaml
 node dist/src/cli/index.js proxy --config warden.yaml
@@ -66,12 +68,12 @@ node dist/src/cli/index.js proxy --config warden.yaml
 - URL and webhook argument values raise network/external-send risk.
 - Doctor flags direct MCP configs as monitoring-only.
 - Doctor flags exposed protected environment variables as monitoring-only.
+- `warden inspect` initializes configured upstreams and prints namespaced tools, descriptions, risk labels, and policy decisions.
 - `warden proxy` can initialize, list namespaced upstream tools, route allowed calls, block policy-denied calls, and execute approval-required calls after terminal side-channel approval.
 - `warden proxy` still fails closed on approval-required calls when no terminal side channel is available.
 
 ## Not Built Yet
 
-- `warden inspect`
 - `warden exec`
 - containerized sandboxing
 - local web approval inbox
@@ -79,9 +81,9 @@ node dist/src/cli/index.js proxy --config warden.yaml
 
 ## Next Engineering Step
 
-Add `warden inspect` for upstream inventory:
+Test `warden proxy` against real Codex and Claude Code clients:
 
-1. Load the same config and upstreams as `warden proxy`.
-2. Print namespaced tools with descriptions, risk labels, and policy decisions.
-3. Support `--json`.
-4. Close upstream child processes cleanly.
+1. Use generated setup snippets to point each client at Warden.
+2. Confirm `tools/list` and namespaced routing work.
+3. Confirm allowed, denied, and approval-required calls behave correctly.
+4. Convert real compatibility failures into focused MCP gateway fixes.

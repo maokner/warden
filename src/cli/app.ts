@@ -11,6 +11,12 @@ import { resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
 import type { ApprovalReviewer } from "../approval/approval.js";
 import { createTerminalReviewer } from "../approval/terminal.js";
+import type {
+  Classification,
+  JsonObject,
+  PolicyDecision,
+  ToolMetadata,
+} from "../domain/types.js";
 import {
   appendAuditEvent,
   classifyToolCall,
@@ -20,6 +26,7 @@ import {
   hashPolicyConfig,
   loadPolicyConfig,
   loadToolCallFixture,
+  makeToolRef,
   readAuditEvents,
   runDoctor,
 } from "../index.js";
@@ -51,6 +58,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         return runAudit(rest, io);
       case "doctor":
         return runDoctorCommand(rest, io);
+      case "inspect":
+        return await runInspect(rest, io);
       case "setup":
         return runSetup(rest, io);
       case "proxy":
@@ -216,6 +225,112 @@ function runSetup(args: string[], io: CliIo): number {
       io.stderr("Usage: warden setup codex|claude [--config /path/to/warden.yaml]\n");
       return 1;
   }
+}
+
+interface InspectToolEntry {
+  name: string;
+  upstream: string;
+  upstreamTool: string;
+  description: string;
+  riskLabels: string[];
+  riskReasons: string[];
+  decision: string;
+  policyRule: string;
+  policyReason: string;
+  inputSchema: JsonObject;
+  annotations: JsonObject;
+}
+
+async function runInspect(args: string[], io: CliIo): Promise<number> {
+  const options = parseOptions(args);
+  const configPath = options.value("--config") ?? "warden.yaml";
+  const config = loadConfig(resolve(io.cwd, configPath), options.has("--config"));
+  const upstreams = createStdioUpstreams(config.upstreams);
+
+  if (upstreams.length === 0) {
+    io.stderr("warden inspect requires at least one configured upstream.\n");
+    return 1;
+  }
+
+  try {
+    await Promise.all(upstreams.map((upstream) => upstream.initialize()));
+    const tools: InspectToolEntry[] = [];
+
+    for (const upstream of upstreams) {
+      const upstreamTools = await upstream.listTools();
+      for (const upstreamTool of upstreamTools) {
+        const ref = makeToolRef(upstream.name, upstreamTool.name);
+        const metadata: ToolMetadata = {
+          ref,
+          description: upstreamTool.description ?? "",
+          inputSchema: upstreamTool.inputSchema,
+          annotations: upstreamTool.annotations ?? {},
+        };
+        const classification = classifyToolCall(metadata, {});
+        const decision = evaluatePolicy(config, ref.fullName, classification);
+        tools.push(inspectToolEntry(metadata, classification, decision));
+      }
+    }
+
+    tools.sort((left, right) => left.name.localeCompare(right.name));
+
+    if (options.has("--json")) {
+      io.stdout(`${JSON.stringify({ tools }, null, 2)}\n`);
+      return 0;
+    }
+
+    io.stdout(formatInspectTools(tools));
+    return 0;
+  } finally {
+    for (const upstream of upstreams) {
+      upstream.close();
+    }
+  }
+}
+
+function inspectToolEntry(
+  metadata: ToolMetadata,
+  classification: Classification,
+  decision: PolicyDecision,
+): InspectToolEntry {
+  return {
+    name: metadata.ref.fullName,
+    upstream: metadata.ref.upstream,
+    upstreamTool: metadata.ref.name,
+    description: metadata.description,
+    riskLabels: classification.labels,
+    riskReasons: classification.reasons,
+    decision: decision.decision,
+    policyRule: decision.rule,
+    policyReason: decision.reason,
+    inputSchema: metadata.inputSchema,
+    annotations: metadata.annotations,
+  };
+}
+
+function formatInspectTools(tools: InspectToolEntry[]): string {
+  const lines: string[] = [];
+
+  for (const tool of tools) {
+    lines.push(tool.name);
+    lines.push(`  upstream: ${tool.upstream}`);
+    lines.push(`  upstream_tool: ${tool.upstreamTool}`);
+    lines.push(`  decision: ${tool.decision}`);
+    lines.push(`  risks: ${tool.riskLabels.join(",")}`);
+    lines.push(`  rule: ${tool.policyRule}`);
+    lines.push(`  reason: ${tool.policyReason}`);
+    if (tool.description) {
+      lines.push(`  description: ${tool.description}`);
+    }
+    for (const reason of tool.riskReasons) {
+      lines.push(`  classifier: ${reason}`);
+    }
+    lines.push("");
+  }
+
+  return tools.length === 0
+    ? "No tools discovered.\n"
+    : `${lines.join("\n")}`;
 }
 
 async function runProxy(args: string[], io: CliIo): Promise<number> {
@@ -431,6 +546,7 @@ Commands:
   warden policy test <call.json> [--config warden.yaml] [--json] [--audit]
   warden audit tail [--path .warden/audit.jsonl] [--limit 20] [--json]
   warden doctor [--json]
+  warden inspect --config warden.yaml [--json]
   warden setup codex|claude [--config /path/to/warden.yaml]
   warden proxy --config warden.yaml [--approver local_user]
 `;

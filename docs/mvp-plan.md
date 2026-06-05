@@ -26,6 +26,7 @@ Build the smallest useful version of Warden that can sit between Codex or Claude
 - Claude Code setup helper: built
 - basic bypass scanner: started
 - terminal side-channel approval in `warden proxy`: built
+- tool inventory through `warden inspect`: built
 
 ### Out of Scope
 
@@ -122,7 +123,7 @@ Warden v0.1 is useful if a developer can:
 8. Review an audit log that explains what happened.
 9. Run `warden doctor` and see whether the setup is monitoring-only or enforced.
 
-Current gap: tool inventory is available through MCP `tools/list`, but the dedicated `warden inspect` CLI command is not built yet.
+Current gap: `warden proxy` still needs direct compatibility testing against real Codex and Claude Code clients.
 
 ## Approval MVP
 

@@ -69,6 +69,13 @@ node dist/src/cli/index.js policy test examples/calls/stripe-refund.json --confi
 node dist/src/cli/index.js doctor --json
 ```
 
+Inspect configured upstream tools before connecting an agent:
+
+```bash
+node dist/src/cli/index.js inspect --config warden.yaml
+node dist/src/cli/index.js inspect --config warden.yaml --json
+```
+
 Generate client setup snippets:
 
 ```bash

@@ -130,6 +130,86 @@ test("CLI doctor returns monitoring_only when direct MCP exists", async () => {
   }
 });
 
+test("CLI inspect emits upstream tool inventory as JSON", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    writeFakeUpstreamConfig(dir);
+
+    const code = await runCli(
+      ["inspect", "--config", "warden.yaml", "--json"],
+      { cwd: dir, ...output.io },
+    );
+    const result = JSON.parse(output.stdout()) as {
+      tools: Array<{
+        name: string;
+        upstream: string;
+        upstreamTool: string;
+        riskLabels: string[];
+        decision: string;
+        policyRule: string;
+      }>;
+    };
+
+    assert.equal(code, 0);
+    assert.deepEqual(
+      result.tools.map((tool) => tool.name),
+      ["fixture.read_echo", "fixture.write_echo"],
+    );
+    assert.equal(result.tools[0]?.name, "fixture.read_echo");
+    assert.equal(result.tools[0]?.upstream, "fixture");
+    assert.equal(result.tools[0]?.upstreamTool, "read_echo");
+    assert.deepEqual(result.tools[0]?.riskLabels, ["read"]);
+    assert.equal(result.tools[0]?.decision, "allow");
+    assert.equal(result.tools[0]?.policyRule, "defaults.read");
+    assert.equal(result.tools[1]?.decision, "require_approval");
+    assert.deepEqual(result.tools[1]?.riskLabels, ["write"]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI inspect emits readable text inventory", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    writeFakeUpstreamConfig(dir);
+
+    const code = await runCli(
+      ["inspect", "--config", "warden.yaml"],
+      { cwd: dir, ...output.io },
+    );
+
+    assert.equal(code, 0);
+    assert.match(output.stdout(), /fixture\.read_echo/);
+    assert.match(output.stdout(), /decision: allow/);
+    assert.match(output.stdout(), /fixture\.write_echo/);
+    assert.match(output.stdout(), /decision: require_approval/);
+    assert.equal(output.stderr(), "");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI inspect command requires configured upstreams", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    const code = await runCli(["inspect"], {
+      cwd: dir,
+      ...output.io,
+    });
+
+    assert.equal(code, 1);
+    assert.match(output.stderr(), /requires at least one configured upstream/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI setup codex prints a Warden-only MCP config snippet", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
   const output = createOutput();
@@ -211,6 +291,39 @@ test("CLI proxy reports missing explicit config through runCli", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+function writeFakeUpstreamConfig(dir: string): void {
+  const fakeUpstreamPath = join(
+    process.cwd(),
+    "dist/tests/fixtures/fake-mcp-upstream.js",
+  );
+
+  writeFileSync(
+    join(dir, "warden.yaml"),
+    `defaults:
+  read: allow
+  write: require_approval
+  destructive: require_approval
+  external_send: require_approval
+  code_execution: require_approval
+  file_mutation: require_approval
+  network_egress: require_approval
+  credential_access: deny
+  financial: deny
+  sensitive_data: require_approval
+  unknown: require_approval
+
+upstreams:
+  fixture:
+    transport: stdio
+    command: ${JSON.stringify(process.execPath)}
+    args:
+      - ${JSON.stringify(fakeUpstreamPath)}
+    startup_timeout_ms: 1000
+    tool_timeout_ms: 1000
+`,
+  );
+}
 
 function createOutput(): {
   io: {

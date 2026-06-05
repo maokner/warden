@@ -88,6 +88,7 @@ The product goal is to sit between a coding/workflow agent and real tools, class
 - `warden policy test`
 - `warden audit tail`
 - `warden doctor`
+- `warden inspect`
 - `warden setup codex`
 - `warden setup claude`
 - `warden proxy`
@@ -105,7 +106,8 @@ The product goal is to sit between a coding/workflow agent and real tools, class
 
 - Unit tests for classifier, policy config, policy engine, redaction, audit, approvals, tool refs, fixtures, doctor, JSON-RPC, gateway, and pipeline.
 - CLI tests.
-- CLI proxy integration test that spawns `warden proxy`, talks MCP over stdio, proxies to a fake upstream process, allows read calls, and blocks approval-required write calls.
+- CLI inspect tests against a fake upstream MCP process.
+- CLI proxy integration test that spawns `warden proxy`, talks MCP over stdio, proxies to a fake upstream process, allows read calls, blocks approval-required write calls without a reviewer, and executes approval-required calls after side-channel approval.
 
 Current verification target:
 
@@ -116,17 +118,19 @@ pnpm run typecheck
 
 ## What Is Left
 
-### Immediate Next Milestone: `warden inspect`
+### Immediate Next Milestone: Real Client Testing
 
-The proxy can now list upstream tools for MCP clients, but developers still need a CLI command that shows the same inventory before connecting an agent.
+`warden inspect` and the fake MCP harness now cover the local proxy path. The next useful milestone is testing the proxy with real Codex and Claude Code clients so compatibility work is driven by actual client behavior.
 
 Expected behavior:
 
-- loads the same policy and upstream config as `warden proxy`
-- initializes configured upstreams
-- prints namespaced tool names, upstream names, descriptions, risk labels, and policy decisions
-- supports `--json` for scripts and tests
-- closes upstream child processes cleanly
+- Codex can connect to `warden proxy`
+- Claude Code can connect to `warden proxy`
+- tools list correctly with Warden namespacing
+- allowed calls execute
+- denied calls block
+- approval-required calls pause for the `/dev/tty` reviewer and then execute or reject
+- any protocol compatibility failures are converted into focused MCP gateway fixes
 
 ### MCP Compatibility
 
@@ -153,7 +157,6 @@ Still needed:
 - graceful shutdown and child-process cleanup hardening
 - startup failure diagnostics
 - per-upstream enable/disable
-- `warden inspect`
 
 ### Bypass Resistance
 
@@ -204,10 +207,9 @@ Still needed:
 
 ## Recommended Build Order
 
-1. Add `warden inspect` for upstream tool inventory and risk labels.
-2. Test `warden proxy` against Codex.
-3. Test `warden proxy` against Claude Code.
-4. Improve doctor scans for user-level config and secrets.
-5. Add `warden exec` environment scrubber.
-6. Add local web approval/audit UI.
-7. Add real MCP compatibility features based on actual client failures.
+1. Test `warden proxy` against Codex.
+2. Test `warden proxy` against Claude Code.
+3. Improve doctor scans for user-level config and secrets.
+4. Add `warden exec` environment scrubber.
+5. Add local web approval/audit UI.
+6. Add real MCP compatibility features based on actual client failures.
