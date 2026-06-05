@@ -1,0 +1,25 @@
+{
+  "name": "warden",
+  "version": "0.1.0",
+  "description": "A local action-control layer for AI agents and MCP tools.",
+  "type": "module",
+  "bin": {
+    "warden": "./dist/src/cli/index.js"
+  },
+  "scripts": {
+    "prebuild": "node scripts/clean-dist.mjs",
+    "build": "tsc -p tsconfig.json",
+    "test": "pnpm run build && node --test \"dist/tests/**/*.test.js\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "yaml": "^2.8.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  },
+  "engines": {
+    "node": ">=22"
+  }
+}

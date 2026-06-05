@@ -1,0 +1,469 @@
+import {
+  closeSync,
+  createReadStream,
+  createWriteStream,
+  existsSync,
+  openSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { resolve } from "node:path";
+import type { Readable, Writable } from "node:stream";
+import type { ApprovalReviewer } from "../approval/approval.js";
+import { createTerminalReviewer } from "../approval/terminal.js";
+import {
+  appendAuditEvent,
+  classifyToolCall,
+  createAuditEvent,
+  defaultPolicyConfig,
+  evaluatePolicy,
+  hashPolicyConfig,
+  loadPolicyConfig,
+  loadToolCallFixture,
+  readAuditEvents,
+  runDoctor,
+} from "../index.js";
+import { SAMPLE_POLICY } from "../config/sample-policy.js";
+import { McpGateway } from "../mcp/gateway.js";
+import { LineJsonRpcPeer } from "../mcp/line-json-rpc.js";
+import { createStdioUpstreams } from "../mcp/upstream.js";
+
+export interface CliIo {
+  cwd: string;
+  stdout: (text: string) => void;
+  stderr: (text: string) => void;
+  mcpInput?: Readable;
+  mcpOutput?: Writable;
+  approvalInput?: Readable;
+  approvalOutput?: Writable;
+}
+
+export async function runCli(argv: string[], io: CliIo): Promise<number> {
+  const [command, ...rest] = argv;
+
+  try {
+    switch (command) {
+      case "init":
+        return runInit(rest, io);
+      case "policy":
+        return runPolicy(rest, io);
+      case "audit":
+        return runAudit(rest, io);
+      case "doctor":
+        return runDoctorCommand(rest, io);
+      case "setup":
+        return runSetup(rest, io);
+      case "proxy":
+        return await runProxy(rest, io);
+      case "help":
+      case "--help":
+      case "-h":
+      case undefined:
+        io.stdout(helpText());
+        return 0;
+      default:
+        io.stderr(`Unknown command: ${command}\n\n${helpText()}`);
+        return 1;
+    }
+  } catch (error) {
+    io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+    return 1;
+  }
+}
+
+function runInit(args: string[], io: CliIo): number {
+  const options = parseOptions(args);
+  const outputPath = resolve(io.cwd, options.value("--path") ?? "warden.yaml");
+  const force = options.has("--force");
+
+  if (existsSync(outputPath) && !force) {
+    io.stderr(
+      `${outputPath} already exists. Use --force to overwrite it intentionally.\n`,
+    );
+    return 1;
+  }
+
+  writeFileSync(outputPath, SAMPLE_POLICY);
+  io.stdout(`Created ${outputPath}\n`);
+  return 0;
+}
+
+function runPolicy(args: string[], io: CliIo): number {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand !== "test") {
+    io.stderr("Usage: warden policy test <call.json> [--config warden.yaml] [--json] [--audit]\n");
+    return 1;
+  }
+
+  const options = parseOptions(rest);
+  const callPath = options.positionals[0];
+  if (!callPath) {
+    io.stderr("Usage: warden policy test <call.json> [--config warden.yaml] [--json] [--audit]\n");
+    return 1;
+  }
+
+  const configPath = options.value("--config") ?? "warden.yaml";
+  const config = loadConfig(resolve(io.cwd, configPath), options.has("--config"));
+  const call = loadToolCallFixture(resolve(io.cwd, callPath));
+
+  if (!call.metadata) {
+    throw new Error("Tool call fixture did not produce metadata.");
+  }
+
+  const classification = classifyToolCall(call.metadata, call.arguments);
+  const decision = evaluatePolicy(config, call.ref.fullName, classification);
+  const policyVersion = hashPolicyConfig(config);
+
+  if (options.has("--audit")) {
+    appendAuditEvent(
+      resolve(io.cwd, config.auditPath),
+      createAuditEvent({
+        call,
+        decision,
+        policyVersion,
+        redactionFields: config.redaction.fields,
+      }),
+    );
+  }
+
+  if (options.has("--json")) {
+    io.stdout(
+      `${JSON.stringify(
+        {
+          tool: call.ref.fullName,
+          classification,
+          decision,
+          policyVersion,
+        },
+        null,
+        2,
+      )}\n`,
+    );
+    return 0;
+  }
+
+  io.stdout(formatPolicyTest(call.ref.fullName, classification, decision));
+  return 0;
+}
+
+function runAudit(args: string[], io: CliIo): number {
+  const [subcommand, ...rest] = args;
+
+  if (subcommand !== "tail") {
+    io.stderr("Usage: warden audit tail [--path .warden/audit.jsonl] [--limit 20] [--json]\n");
+    return 1;
+  }
+
+  const options = parseOptions(rest);
+  const auditPath = resolve(io.cwd, options.value("--path") ?? ".warden/audit.jsonl");
+  const limit = Number(options.value("--limit") ?? "20");
+
+  if (!Number.isInteger(limit) || limit <= 0) {
+    throw new Error("--limit must be a positive integer.");
+  }
+
+  if (!existsSync(auditPath)) {
+    io.stdout(`No audit log found at ${auditPath}\n`);
+    return 0;
+  }
+
+  const events = readAuditEvents(auditPath).slice(-limit);
+  if (options.has("--json")) {
+    io.stdout(`${JSON.stringify(events, null, 2)}\n`);
+    return 0;
+  }
+
+  for (const event of events) {
+    io.stdout(
+      `${event.timestamp} ${event.decision} ${event.tool} risks=${event.riskLabels.join(",")} rule=${event.policyRule}\n`,
+    );
+  }
+
+  return 0;
+}
+
+function runDoctorCommand(args: string[], io: CliIo): number {
+  const options = parseOptions(args);
+  const report = runDoctor(io.cwd, { env: process.env });
+
+  if (options.has("--json")) {
+    io.stdout(`${JSON.stringify(report, null, 2)}\n`);
+    return report.status === "monitoring_only" ? 2 : 0;
+  }
+
+  io.stdout(`status: ${report.status}\n`);
+  for (const issue of report.issues) {
+    io.stdout(`${issue.severity}: ${issue.code} - ${issue.message}\n`);
+  }
+
+  return report.status === "monitoring_only" ? 2 : 0;
+}
+
+function runSetup(args: string[], io: CliIo): number {
+  const [target, ...rest] = args;
+  const options = parseOptions(rest);
+  const configPath = resolve(io.cwd, options.value("--config") ?? "warden.yaml");
+
+  switch (target) {
+    case "codex":
+      io.stdout(codexSetupSnippet(configPath));
+      return 0;
+    case "claude":
+      io.stdout(claudeSetupSnippet(configPath));
+      return 0;
+    default:
+      io.stderr("Usage: warden setup codex|claude [--config /path/to/warden.yaml]\n");
+      return 1;
+  }
+}
+
+async function runProxy(args: string[], io: CliIo): Promise<number> {
+  const options = parseOptions(args);
+  const configPath = options.value("--config") ?? "warden.yaml";
+  const config = loadConfig(resolve(io.cwd, configPath), options.has("--config"));
+  const upstreams = createStdioUpstreams(config.upstreams);
+
+  if (upstreams.length === 0) {
+    io.stderr("warden proxy requires at least one configured upstream.\n");
+    return 1;
+  }
+
+  const approvalOptions = {
+    approver: options.value("--approver") ?? defaultApprover(),
+  };
+  if (io.approvalInput) {
+    Object.assign(approvalOptions, { input: io.approvalInput });
+  }
+  if (io.approvalOutput) {
+    Object.assign(approvalOptions, { output: io.approvalOutput });
+  }
+  const approvalSideChannel = createApprovalSideChannel(approvalOptions);
+
+  const gatewayOptions = {
+    config,
+    upstreams,
+    auditPath: resolve(io.cwd, config.auditPath),
+  };
+  if (approvalSideChannel.reviewer) {
+    Object.assign(gatewayOptions, { reviewer: approvalSideChannel.reviewer });
+  }
+  const gateway = new McpGateway(gatewayOptions);
+
+  io.stderr(`Warden proxy started with ${upstreams.length} upstream(s).\n`);
+  io.stderr(`${approvalSideChannel.message}\n`);
+
+  return new Promise<number>((resolveExitCode) => {
+    const input = io.mcpInput ?? process.stdin;
+    const output = io.mcpOutput ?? process.stdout;
+    const peer = new LineJsonRpcPeer({
+      input,
+      output,
+      onRequest: (request) => gateway.handleRequest(request),
+      onNotification: () => undefined,
+      onError: (error) => {
+        io.stderr(`${error.message}\n`);
+      },
+    });
+
+    let closed = false;
+    const close = () => {
+      if (closed) {
+        return;
+      }
+      closed = true;
+      peer.close();
+      gateway.close();
+      approvalSideChannel.close();
+      resolveExitCode(0);
+    };
+
+    input.once("close", close);
+    input.once("end", close);
+  });
+}
+
+function createApprovalSideChannel(options: {
+  input?: Readable;
+  output?: Writable;
+  approver: string;
+}): {
+  reviewer?: ApprovalReviewer;
+  close: () => void;
+  message: string;
+} {
+  if (options.input || options.output) {
+    if (!options.input || !options.output) {
+      throw new Error("Proxy approval side channel requires both input and output streams.");
+    }
+
+    return {
+      reviewer: createTerminalReviewer({
+        input: options.input,
+        output: options.output,
+        approver: options.approver,
+      }),
+      close: () => undefined,
+      message: "Approval side channel: injected terminal streams.",
+    };
+  }
+
+  let inputFd: number | undefined;
+  let outputFd: number | undefined;
+
+  try {
+    inputFd = openSync("/dev/tty", "r");
+    outputFd = openSync("/dev/tty", "w");
+    const input = createReadStream("/dev/tty", {
+      fd: inputFd,
+      autoClose: true,
+    });
+    const output = createWriteStream("/dev/tty", {
+      fd: outputFd,
+      autoClose: true,
+    });
+
+    return {
+      reviewer: createTerminalReviewer({
+        input,
+        output,
+        approver: options.approver,
+      }),
+      close: () => {
+        input.destroy();
+        output.destroy();
+      },
+      message: "Approval side channel: /dev/tty terminal prompt.",
+    };
+  } catch {
+    if (inputFd !== undefined) {
+      closeSync(inputFd);
+    }
+    if (outputFd !== undefined) {
+      closeSync(outputFd);
+    }
+
+    return {
+      close: () => undefined,
+      message:
+        "Approval side channel unavailable; approval-required calls will fail closed.",
+    };
+  }
+}
+
+function defaultApprover(): string {
+  return process.env["USER"] ?? process.env["USERNAME"] ?? "local_user";
+}
+
+function loadConfig(path: string, explicit: boolean) {
+  if (existsSync(path)) {
+    return loadPolicyConfig(path);
+  }
+
+  if (explicit) {
+    throw new Error(`Policy config not found: ${path}`);
+  }
+
+  return defaultPolicyConfig();
+}
+
+function formatPolicyTest(
+  tool: string,
+  classification: { labels: string[]; reasons: string[] },
+  decision: { decision: string; rule: string; reason: string },
+): string {
+  const lines = [
+    `tool: ${tool}`,
+    `decision: ${decision.decision}`,
+    `risks: ${classification.labels.join(",")}`,
+    `rule: ${decision.rule}`,
+    `reason: ${decision.reason}`,
+  ];
+
+  for (const reason of classification.reasons) {
+    lines.push(`classifier: ${reason}`);
+  }
+
+  return `${lines.join("\n")}\n`;
+}
+
+function parseOptions(args: string[]): {
+  positionals: string[];
+  has: (name: string) => boolean;
+  value: (name: string) => string | undefined;
+} {
+  const flags = new Set<string>();
+  const values = new Map<string, string>();
+  const positionals: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg) {
+      continue;
+    }
+
+    if (!arg.startsWith("--")) {
+      positionals.push(arg);
+      continue;
+    }
+
+    const next = args[index + 1];
+    if (next && !next.startsWith("--")) {
+      values.set(arg, next);
+      index += 1;
+    } else {
+      flags.add(arg);
+    }
+  }
+
+  return {
+    positionals,
+    has: (name) => flags.has(name) || values.has(name),
+    value: (name) => values.get(name),
+  };
+}
+
+function helpText(): string {
+  return `Warden
+
+Commands:
+  warden init [--path warden.yaml] [--force]
+  warden policy test <call.json> [--config warden.yaml] [--json] [--audit]
+  warden audit tail [--path .warden/audit.jsonl] [--limit 20] [--json]
+  warden doctor [--json]
+  warden setup codex|claude [--config /path/to/warden.yaml]
+  warden proxy --config warden.yaml [--approver local_user]
+`;
+}
+
+function codexSetupSnippet(configPath: string): string {
+  return `[mcp_servers.warden]
+command = "warden"
+args = ["proxy", "--config", "${escapeTomlString(configPath)}"]
+default_tools_approval_mode = "approve"
+
+# Keep protected upstream MCP servers out of Codex config.
+# Warden should own upstream credentials, policy, approval, and audit.
+`;
+}
+
+function claudeSetupSnippet(configPath: string): string {
+  return `${JSON.stringify(
+    {
+      mcpServers: {
+        warden: {
+          type: "stdio",
+          command: "warden",
+          args: ["proxy", "--config", configPath],
+        },
+      },
+    },
+    null,
+    2,
+  )}
+`;
+}
+
+function escapeTomlString(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}

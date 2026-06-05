@@ -1,0 +1,11 @@
+{
+  "tool": "slack.send_message",
+  "description": "Send a Slack message to a channel",
+  "arguments": {
+    "channel": "C123",
+    "text": "Deploy finished"
+  },
+  "client": "claude-code",
+  "agent": "claude",
+  "user": "local_user"
+}

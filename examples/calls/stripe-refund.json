@@ -1,0 +1,11 @@
+{
+  "tool": "stripe.create_refund",
+  "description": "Refund a payment",
+  "arguments": {
+    "payment_intent": "pi_example",
+    "amount": 5000
+  },
+  "client": "codex",
+  "agent": "gpt",
+  "user": "local_user"
+}

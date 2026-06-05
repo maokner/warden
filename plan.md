@@ -1,0 +1,213 @@
+# Warden Plan
+
+## Current Product Definition
+
+Warden is an action-control layer for AI agents and MCP tools.
+
+The product goal is to sit between a coding/workflow agent and real tools, classify every tool call, enforce policy, require approval for risky actions, and write useful audit evidence. Warden should eventually also reduce bypass paths by owning credentials, policy, audit storage, and the network route to protected systems.
+
+## What Is Built
+
+### Core Project
+
+- TypeScript package and CLI scaffold.
+- Strict TypeScript configuration.
+- Clean build before tests to avoid stale compiled artifacts.
+- Minimal dependency surface:
+  - production: `yaml`
+  - dev: `typescript`, `@types/node`
+
+### Policy And Classification
+
+- YAML policy parser.
+- Secure default decisions:
+  - read: allow
+  - write: require approval
+  - destructive: require approval
+  - external send: require approval
+  - code execution: require approval
+  - file mutation: require approval
+  - network egress: require approval
+  - credential access: deny
+  - financial: deny
+  - sensitive data: require approval
+  - unknown: require approval
+- Deterministic classifier for tool names, descriptions, schemas, annotations, SQL, and bounded argument values.
+- Suspicious metadata detection for prompt-injection-like tool descriptions.
+- Deny-risk precedence so sensitive/financial/credential risks cannot be weakened by ordinary tool-specific approval rules.
+
+### Audit And Redaction
+
+- JSONL audit event creation and append.
+- Redaction for configured sensitive fields.
+- Default redaction fields are always retained even when users add custom fields.
+- Secret-looking substrings are scrubbed inside larger string values.
+- Audit events include decision, policy rule, risk labels, request args, executed args when applicable, response status, duration, and errors.
+
+### Approval Core
+
+- Approval request creation.
+- Approve, reject, edit-and-approve, expire, and failure semantics.
+- Approval timeout fails closed.
+- Edited arguments preserve the original request and are reclassified before execution.
+- Terminal reviewer supports approve, reject, edit-and-approve, and details.
+- `warden proxy` opens a `/dev/tty` terminal approval side channel when available, keeping MCP protocol traffic isolated to stdin/stdout.
+- If no terminal side channel is available, approval-required proxy calls still fail closed.
+
+### Tool-Call Pipeline
+
+- End-to-end handler:
+  - classify
+  - evaluate policy
+  - require approval if needed
+  - execute allowed/approved calls
+  - block denied/rejected/expired calls
+  - write audit event when an audit path is supplied
+- Upstream execution errors are preserved as upstream errors, not converted into Warden policy blocks.
+
+### MCP Gateway
+
+- Minimal newline-delimited JSON-RPC transport.
+- Minimal MCP stdio gateway exposed by `warden proxy`.
+- Supported methods:
+  - `initialize`
+  - `notifications/initialized`
+  - `ping`
+  - `tools/list`
+  - `tools/call`
+- Stdio upstream MCP client.
+- Multiple stdio upstreams can be configured.
+- Upstream tools are exposed as namespaced tools such as `filesystem.write_file`.
+- `tools/call` routes through Warden policy/audit pipeline.
+- Approval-required calls pause for terminal review in `warden proxy` when `/dev/tty` is available.
+- Approval-required calls fail closed in non-interactive proxy sessions without an approval side channel.
+
+### CLI
+
+- `warden init`
+- `warden policy test`
+- `warden audit tail`
+- `warden doctor`
+- `warden setup codex`
+- `warden setup claude`
+- `warden proxy`
+
+### Doctor Checks
+
+- Flags direct Claude Code project MCP registrations.
+- Flags direct Codex project MCP registrations.
+- Flags workspace-local `.env`.
+- Flags workspace-local `warden.yaml`.
+- Flags protected credential environment variables.
+- Does not claim full enforcement locally.
+
+### Tests
+
+- Unit tests for classifier, policy config, policy engine, redaction, audit, approvals, tool refs, fixtures, doctor, JSON-RPC, gateway, and pipeline.
+- CLI tests.
+- CLI proxy integration test that spawns `warden proxy`, talks MCP over stdio, proxies to a fake upstream process, allows read calls, and blocks approval-required write calls.
+
+Current verification target:
+
+```bash
+pnpm test
+pnpm run typecheck
+```
+
+## What Is Left
+
+### Immediate Next Milestone: `warden inspect`
+
+The proxy can now list upstream tools for MCP clients, but developers still need a CLI command that shows the same inventory before connecting an agent.
+
+Expected behavior:
+
+- loads the same policy and upstream config as `warden proxy`
+- initializes configured upstreams
+- prints namespaced tool names, upstream names, descriptions, risk labels, and policy decisions
+- supports `--json` for scripts and tests
+- closes upstream child processes cleanly
+
+### MCP Compatibility
+
+The current MCP gateway is intentionally minimal.
+
+Still needed:
+
+- tool-list pagination support
+- cancellation
+- progress notifications
+- resources
+- prompts
+- streamable HTTP transport
+- better MCP protocol version negotiation
+- compatibility testing against real Codex and Claude Code clients
+
+### Upstream Management
+
+Still needed:
+
+- env interpolation from Warden-owned variables or secret store
+- safer environment forwarding
+- upstream restart/backoff
+- graceful shutdown and child-process cleanup hardening
+- startup failure diagnostics
+- per-upstream enable/disable
+- `warden inspect`
+
+### Bypass Resistance
+
+Still needed:
+
+- user-level Codex config scanning
+- user-level Claude config scanning
+- code scanning for direct protected SDK imports and hostnames
+- detection of direct API keys in project files
+- `warden exec` to launch agents with scrubbed env/config
+- network egress controls
+- sandbox/container mode
+- clearer `monitoring_only`, `partially_enforced`, and `enforced` status logic
+
+### Audit Hardening
+
+Still needed:
+
+- append-only local log option
+- hash chaining
+- remote audit sink
+- log rotation
+- size limits
+- malformed log recovery
+- stable run IDs across a single agent run
+
+### Product Surface
+
+Still needed:
+
+- local web UI
+- approval inbox
+- audit viewer
+- tool inventory viewer
+- policy editor/tester
+- Codex/Claude setup docs verified against real clients
+- hosted/team product
+- SSO and team policy ownership
+
+## Known Current Limitations
+
+- The classifier is heuristic and conservative, not complete.
+- The redactor catches common token patterns, not every possible secret.
+- MCP support is enough for a controlled prototype, not full protocol coverage.
+- `warden proxy` terminal approval requires an available `/dev/tty`; non-interactive sessions fail closed.
+- Local doctor checks are shallow and do not prove enforcement.
+- Warden still cannot stop bypass if the agent has direct credentials, network, or writable config access.
+
+## Recommended Build Order
+
+1. Add `warden inspect` for upstream tool inventory and risk labels.
+2. Test `warden proxy` against Codex.
+3. Test `warden proxy` against Claude Code.
+4. Improve doctor scans for user-level config and secrets.
+5. Add `warden exec` environment scrubber.
+6. Add local web approval/audit UI.
+7. Add real MCP compatibility features based on actual client failures.

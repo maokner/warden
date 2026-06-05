@@ -1,0 +1,11 @@
+{
+  "tool": "filesystem.write_file",
+  "description": "Write a file to disk",
+  "arguments": {
+    "path": "src/config.ts",
+    "content": "export const enabled = true;"
+  },
+  "client": "codex",
+  "agent": "gpt",
+  "user": "local_user"
+}
