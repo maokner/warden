@@ -95,4 +95,4 @@ Current behavior:
 
 Next step:
 
-- test the proxy against real Codex and Claude Code clients, then fill MCP compatibility gaps based on concrete failures.
+- test model-driven tool calls through real Codex and Claude Code sessions, then fill MCP compatibility gaps based on concrete failures.

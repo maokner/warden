@@ -17,6 +17,7 @@ The current codebase includes the local product core:
 - stdio upstream MCP client
 - `/dev/tty` approval side channel for `warden proxy`
 - `warden inspect` upstream tool inventory with risk labels and policy decisions
+- client compatibility smoke check for Codex and Claude Code MCP registration
 - basic `warden doctor`
 - Codex and Claude Code setup snippet generation
 - example policies and tool-call fixtures
@@ -37,6 +38,7 @@ The review pass fixed several important issues:
 ```bash
 pnpm test
 pnpm run build
+pnpm run compat:clients
 
 node dist/src/cli/index.js init
 node dist/src/cli/index.js policy test examples/calls/filesystem-write.json --config examples/policies/warden.yaml
@@ -69,6 +71,7 @@ node dist/src/cli/index.js proxy --config warden.yaml
 - Doctor flags direct MCP configs as monitoring-only.
 - Doctor flags exposed protected environment variables as monitoring-only.
 - `warden inspect` initializes configured upstreams and prints namespaced tools, descriptions, risk labels, and policy decisions.
+- `pnpm run compat:clients` verifies Warden MCP registration with installed Codex and Claude Code CLIs using temporary config.
 - `warden proxy` can initialize, list namespaced upstream tools, route allowed calls, block policy-denied calls, and execute approval-required calls after terminal side-channel approval.
 - `warden proxy` still fails closed on approval-required calls when no terminal side channel is available.
 
@@ -76,14 +79,15 @@ node dist/src/cli/index.js proxy --config warden.yaml
 
 - `warden exec`
 - containerized sandboxing
+- model-driven Codex and Claude Code tool-call smoke tests
 - local web approval inbox
 - hosted team product
 
 ## Next Engineering Step
 
-Test `warden proxy` against real Codex and Claude Code clients:
+Test model-driven Warden tool calls through Codex and Claude Code:
 
-1. Use generated setup snippets to point each client at Warden.
-2. Confirm `tools/list` and namespaced routing work.
-3. Confirm allowed, denied, and approval-required calls behave correctly.
+1. Use generated setup snippets or temp config to point each client at Warden.
+2. Ask each client to call an allowed fake read tool through Warden.
+3. Confirm denied and approval-required calls behave correctly.
 4. Convert real compatibility failures into focused MCP gateway fixes.

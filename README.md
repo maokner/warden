@@ -49,6 +49,7 @@ The first product is an MCP action firewall:
 - [Build Plan](docs/build-plan.md)
 - [Implementation Status](docs/implementation-status.md)
 - [MCP Gateway](docs/mcp-gateway.md)
+- [Client Compatibility](docs/client-compatibility.md)
 - [Product Strategy](docs/product-strategy.md)
 - [Security Model](docs/security-model.md)
 - [Approval Workflow](docs/approval-workflow.md)
@@ -59,6 +60,7 @@ The first product is an MCP action firewall:
 pnpm install
 pnpm test
 pnpm run build
+pnpm run compat:clients
 ```
 
 Try the current policy engine:

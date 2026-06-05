@@ -92,6 +92,7 @@ The product goal is to sit between a coding/workflow agent and real tools, class
 - `warden setup codex`
 - `warden setup claude`
 - `warden proxy`
+- `pnpm run compat:clients`
 
 ### Doctor Checks
 
@@ -108,6 +109,7 @@ The product goal is to sit between a coding/workflow agent and real tools, class
 - CLI tests.
 - CLI inspect tests against a fake upstream MCP process.
 - CLI proxy integration test that spawns `warden proxy`, talks MCP over stdio, proxies to a fake upstream process, allows read calls, blocks approval-required write calls without a reviewer, and executes approval-required calls after side-channel approval.
+- Client compatibility smoke script for Codex and Claude Code MCP registration using temporary config.
 
 Current verification target:
 
@@ -118,17 +120,15 @@ pnpm run typecheck
 
 ## What Is Left
 
-### Immediate Next Milestone: Real Client Testing
+### Immediate Next Milestone: Model-Driven Client Testing
 
-`warden inspect` and the fake MCP harness now cover the local proxy path. The next useful milestone is testing the proxy with real Codex and Claude Code clients so compatibility work is driven by actual client behavior.
+`warden inspect`, the fake MCP harness, and client registration smoke checks now cover the deterministic local path. The next useful milestone is testing actual model-driven Codex and Claude Code sessions that call Warden tools.
 
 Expected behavior:
 
-- Codex can connect to `warden proxy`
-- Claude Code can connect to `warden proxy`
-- tools list correctly with Warden namespacing
-- allowed calls execute
-- denied calls block
+- Codex can call an allowed Warden tool through `warden proxy`
+- Claude Code can call an allowed Warden tool through `warden proxy`
+- denied calls block with a structured policy response
 - approval-required calls pause for the `/dev/tty` reviewer and then execute or reject
 - any protocol compatibility failures are converted into focused MCP gateway fixes
 
@@ -207,8 +207,8 @@ Still needed:
 
 ## Recommended Build Order
 
-1. Test `warden proxy` against Codex.
-2. Test `warden proxy` against Claude Code.
+1. Test model-driven `warden proxy` tool calls through Codex.
+2. Test model-driven `warden proxy` tool calls through Claude Code.
 3. Improve doctor scans for user-level config and secrets.
 4. Add `warden exec` environment scrubber.
 5. Add local web approval/audit UI.
