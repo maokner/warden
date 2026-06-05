@@ -20,13 +20,13 @@ Agent builders will become plentiful and cheap. The durable product opportunity 
 
 ## Initial Wedge
 
-The first product is an MCP action firewall:
+The core product is an action boundary:
 
-1. Run Warden as a local or hosted proxy in front of MCP servers.
-2. Point an MCP-compatible client at Warden instead of directly at tools.
-3. Warden inspects each tool list, tool description, input schema, and tool call.
-4. Warden allows, blocks, or asks for approval based on policy.
-5. Warden logs a human-readable audit trail for every action.
+1. Put Warden between an agent and a protected tool, API, or database.
+2. Warden classifies each action using tool metadata and arguments.
+3. Warden allows, blocks, or asks for approval based on policy.
+4. Warden logs a human-readable audit trail for every action.
+5. Use MCP, the TypeScript SDK, or future adapters to connect different agent stacks.
 
 ## Target Users
 
@@ -44,6 +44,7 @@ The first product is an MCP action firewall:
 ## Docs
 
 - [Product Overview](docs/product-overview.md)
+- [Generic Action Boundary](docs/generic-action-boundary.md)
 - [Expected Behavior](docs/expected-behavior.md)
 - [MVP Plan](docs/mvp-plan.md)
 - [Build Plan](docs/build-plan.md)
@@ -69,6 +70,27 @@ Try the current policy engine:
 node dist/src/cli/index.js policy test examples/calls/filesystem-write.json --config examples/policies/warden.yaml
 node dist/src/cli/index.js policy test examples/calls/stripe-refund.json --config examples/policies/warden.yaml --json
 node dist/src/cli/index.js doctor --json
+```
+
+Use Warden inside an app backend:
+
+```ts
+import { defaultPolicyConfig, guardAction } from "warden";
+
+const policy = defaultPolicyConfig();
+policy.defaults.destructive = "deny";
+
+const result = await guardAction({
+  config: policy,
+  tool: "database.run_sql",
+  description: "Run SQL against the production application database",
+  arguments: { sql: "drop table users" },
+  execute: async (args) => db.query(String(args.sql)),
+});
+
+if (!result.executed) {
+  throw new Error(result.error);
+}
 ```
 
 Inspect configured upstream tools before connecting an agent:

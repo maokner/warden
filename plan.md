@@ -2,9 +2,9 @@
 
 ## Current Product Definition
 
-Warden is an action-control layer for AI agents and MCP tools.
+Warden is an action-control layer for AI agents.
 
-The product goal is to sit between a coding/workflow agent and real tools, classify every tool call, enforce policy, require approval for risky actions, and write useful audit evidence. Warden should eventually also reduce bypass paths by owning credentials, policy, audit storage, and the network route to protected systems.
+The product goal is to sit between any agent and real tools, APIs, databases, or production systems, classify every action, enforce policy, require approval for risky actions, and write useful audit evidence. Warden should eventually also reduce bypass paths by owning credentials, policy, audit storage, and the network route to protected systems.
 
 ## What Is Built
 
@@ -65,6 +65,19 @@ The product goal is to sit between a coding/workflow agent and real tools, class
   - write audit event when an audit path is supplied
 - Upstream execution errors are preserved as upstream errors, not converted into Warden policy blocks.
 
+### Generic SDK
+
+- `guardAction` TypeScript API for app backends and agent tool wrappers.
+- App code can guard arbitrary actions without MCP:
+  - database queries
+  - internal API calls
+  - admin operations
+  - external sends
+  - billing actions
+- SQL `SELECT` calls can run immediately under default policy.
+- SQL writes fail closed without approval.
+- Destructive SQL can be hard-denied before the database executor runs.
+
 ### MCP Gateway
 
 - Minimal newline-delimited JSON-RPC transport.
@@ -106,6 +119,7 @@ The product goal is to sit between a coding/workflow agent and real tools, class
 ### Tests
 
 - Unit tests for classifier, policy config, policy engine, redaction, audit, approvals, tool refs, fixtures, doctor, JSON-RPC, gateway, and pipeline.
+- SDK guard tests for app/database integration.
 - CLI tests.
 - CLI inspect tests against a fake upstream MCP process.
 - CLI proxy integration test that spawns `warden proxy`, talks MCP over stdio, proxies to a fake upstream process, allows read calls, blocks approval-required write calls without a reviewer, and executes approval-required calls after side-channel approval.
@@ -121,16 +135,27 @@ pnpm run typecheck
 
 ## What Is Left
 
-### Immediate Next Milestone: Finish Model-Driven Client Testing
+### Immediate Next Milestone: Language-Neutral Action Boundary
 
-`warden inspect`, the fake MCP harness, client registration smoke checks, and a model-driven Codex allowed-read smoke now cover the local Codex path. The next useful milestone is finishing model-driven Claude Code testing and exercising denied and approval-required calls through both clients.
+`guardAction` makes Warden usable inside TypeScript app backends. The next useful milestone is a language-neutral local HTTP sidecar so any agent framework or web app can ask Warden to authorize an action before touching a database or protected API.
 
 Expected behavior:
 
-- Claude Code can call an allowed Warden tool through `warden proxy`
-- denied calls block with a structured policy response
-- approval-required calls pause for the `/dev/tty` reviewer and then execute or reject
-- any protocol compatibility failures are converted into focused MCP gateway fixes
+- app sends action metadata and arguments to Warden over localhost HTTP
+- Warden returns allow, deny, or require-approval decision
+- optional execute-through mode calls a configured protected action adapter
+- decision-only mode lets the app enforce locally while still writing audit evidence
+- works for non-MCP agents and non-TypeScript stacks
+
+### Database Protection
+
+Still needed:
+
+- richer SQL parsing beyond deterministic keyword heuristics
+- database-specific policy templates for Postgres, MySQL, and SQLite
+- row/table allowlists and denylists
+- production/staging environment labels
+- explicit bulk-export and cross-tenant data-access detection
 
 ### MCP Compatibility
 
@@ -207,9 +232,9 @@ Still needed:
 
 ## Recommended Build Order
 
-1. Test model-driven allowed read calls through Claude Code after local Claude auth is available.
-2. Test denied and approval-required model-driven calls through Codex and Claude Code.
-3. Improve doctor scans for user-level config and secrets.
+1. Add a localhost HTTP decision sidecar for non-MCP and non-TypeScript apps.
+2. Add database-specific policy templates and stronger SQL classification.
+3. Improve doctor scans for direct database/API bypass paths.
 4. Add `warden exec` environment scrubber.
 5. Add local web approval/audit UI.
-6. Add real MCP compatibility features based on actual client failures.
+6. Continue MCP/client compatibility based on actual user demand.

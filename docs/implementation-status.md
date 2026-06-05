@@ -12,6 +12,7 @@ The current codebase includes the local product core:
 - JSONL audit logger
 - approval request and resolution core
 - terminal approval reviewer
+- generic `guardAction` TypeScript SDK for app backends and agent tool wrappers
 - end-to-end fake tool-call pipeline
 - minimal stdio MCP gateway
 - stdio upstream MCP client
@@ -31,6 +32,7 @@ The review pass fixed several important issues:
 - The classifier now inspects bounded string argument values for URLs, webhooks, email destinations, and token-like secrets.
 - Suspicious MCP metadata such as "ignore previous instructions" now forces review by adding `unknown`.
 - `warden doctor` now flags protected credential environment variables.
+- `guardAction` can protect arbitrary backend functions without MCP.
 - `warden proxy` now serves a minimal MCP stdio gateway.
 
 ## Current Commands
@@ -68,6 +70,9 @@ node dist/src/cli/index.js proxy --config warden.yaml
 - Audit logs redact common secret-looking substrings inside larger string values.
 - Suspicious tool metadata requires review.
 - URL and webhook argument values raise network/external-send risk.
+- SQL `SELECT` actions can execute through `guardAction`.
+- SQL writes fail closed through `guardAction` when no reviewer is configured.
+- Destructive SQL can be hard-denied before the database function executes.
 - Doctor flags direct MCP configs as monitoring-only.
 - Doctor flags exposed protected environment variables as monitoring-only.
 - `warden inspect` initializes configured upstreams and prints namespaced tools, descriptions, risk labels, and policy decisions.
@@ -79,6 +84,8 @@ node dist/src/cli/index.js proxy --config warden.yaml
 ## Not Built Yet
 
 - `warden exec`
+- localhost HTTP sidecar for non-TypeScript and non-MCP integrations
+- database-specific policy templates and stronger SQL classification
 - containerized sandboxing
 - model-driven Claude Code tool-call smoke test
 - model-driven denied and approval-required client smoke tests
@@ -87,9 +94,9 @@ node dist/src/cli/index.js proxy --config warden.yaml
 
 ## Next Engineering Step
 
-Finish model-driven client smoke coverage:
+Add a language-neutral Warden action boundary:
 
-1. Authenticate Claude Code locally and confirm it can call the allowed fake read tool through Warden.
-2. Confirm denied calls behave correctly in Codex and Claude Code.
-3. Confirm approval-required calls behave correctly in Codex and Claude Code.
-4. Convert real compatibility failures into focused MCP gateway fixes.
+1. Expose a localhost HTTP decision API.
+2. Accept action metadata and arguments from any app or agent framework.
+3. Return allow, deny, or require-approval decisions with audit evidence.
+4. Add database-focused policy templates and stronger SQL checks.

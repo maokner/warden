@@ -10,7 +10,7 @@ Warden solves the gap between "agent can call tools" and "agent is safe enough t
 
 ## Initial Customer
 
-The initial customer is not a Fortune 500 security committee. It is a developer or small technical team already experimenting with agents and MCP.
+The initial customer is not a Fortune 500 security committee. It is a developer or small technical team already connecting agents, chatbots, or automation workflows to real databases, internal APIs, SaaS tools, or MCP servers.
 
 They have pain now:
 
@@ -22,7 +22,7 @@ They have pain now:
 
 ## First Use Case
 
-"I want to let my coding or workflow agent use local/file/SaaS MCP tools, but I want approval gates and logs before it can mutate anything important."
+"I want to let my agentic chatbot or workflow use a real database/API, but I need a definitive policy layer that can stop destructive actions before they execute."
 
 This is narrow enough to build and broad enough to matter.
 
@@ -31,7 +31,7 @@ This is narrow enough to build and broad enough to matter.
 The agent ecosystem creates a control-plane need:
 
 - More agents means more tool calls.
-- More MCP servers means more unknown capabilities.
+- More connected databases, APIs, and MCP servers means more unknown capabilities.
 - More AI-published apps means more accidental privacy and safety risk.
 - More autonomy means more demand for approvals, logs, replay, and accountability.
 
@@ -39,14 +39,14 @@ Agent builders compete on creation speed. Warden competes on operational trust.
 
 ## Wedge
 
-Start as a local MCP proxy that developers can try in under ten minutes.
+Start as a local action boundary developers can try in under ten minutes.
 
 The first "wow" moment should be:
 
-1. Warden discovers the tools my agent can call.
-2. It correctly labels risky actions.
-3. It blocks or pauses dangerous calls by default.
-4. I can approve a write action intentionally.
+1. I wrap a database/API/tool call with Warden.
+2. Warden correctly labels risky arguments, including destructive SQL.
+3. It blocks or pauses dangerous calls before execution.
+4. I can approve a controlled write action intentionally.
 5. I get a clean audit log afterward.
 
 ## Product Principles
@@ -64,6 +64,7 @@ The first "wow" moment should be:
 ### Free / Open Source
 
 - local proxy
+- TypeScript SDK guard
 - single-user policy files
 - terminal approvals
 - local JSONL audit logs
@@ -107,8 +108,8 @@ They secure normal APIs. Warden understands agent-specific risks like tool poiso
 
 Build a CLI that can:
 
-- connect to one MCP server
-- list tools
+- wrap one protected backend action
+- classify action metadata and arguments
 - classify risk
 - enforce YAML policy
 - log calls
@@ -116,13 +117,13 @@ Build a CLI that can:
 
 ### Milestone 2: Real Integrations
 
-Test with real MCP clients and servers:
+Test with real app and agent integrations:
 
-- Cursor or Claude Desktop first
-- filesystem MCP
-- GitHub MCP
-- Slack or Gmail-style external-send MCP
-- database MCP
+- database-backed chatbot
+- internal API tool wrapper
+- MCP proxy
+- external-send tool
+- billing/financial action simulator
 
 ### Milestone 3: Developer Trust
 
@@ -196,4 +197,3 @@ Team product metrics:
 The next product decision is the first integration target.
 
 Recommended path: build against MCP over stdio first, with a simple filesystem test server. This gives us a contained, testable, real tool surface before we deal with hosted OAuth-heavy tools.
-

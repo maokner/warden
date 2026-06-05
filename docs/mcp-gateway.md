@@ -93,6 +93,6 @@ Current behavior:
 - `require_approval` calls pause for a `/dev/tty` terminal prompt when a terminal side channel is available.
 - `require_approval` calls fail closed when no approval side channel is available.
 
-Next step:
+Next MCP-specific step:
 
-- test model-driven tool calls through real Codex and Claude Code sessions, then fill MCP compatibility gaps based on concrete failures.
+- test model-driven tool calls through real MCP clients when MCP compatibility becomes the active focus, then fill protocol gaps based on concrete failures.

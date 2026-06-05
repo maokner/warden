@@ -2,22 +2,22 @@
 
 ## Product We Are Building
 
-Warden is a trusted action boundary for coding agents and MCP tools.
+Warden is a trusted action boundary for AI agents.
 
 The product has two linked jobs:
 
 1. Govern tool calls while they happen.
-2. Reduce the ways a coding agent can route around that governance.
+2. Reduce the ways an agent can route around that governance.
 
-The first version should be local-first, CLI-first, and useful with Codex and Claude Code.
+The first version should be local-first, CLI-first, and useful for app backends, database-backed chatbots, MCP clients, and coding agents.
 
 ## Core Architecture
 
 ```text
-Codex / Claude Code / MCP Client
+Agent / Chatbot / MCP Client
   |
   v
-Warden MCP Gateway
+App SDK Guard / Warden MCP Gateway / Future HTTP Sidecar
   |
   +-- Tool Registry
   +-- Risk Classifier
@@ -27,10 +27,16 @@ Warden MCP Gateway
   +-- Bypass Scanner
   |
   v
-Upstream MCP Servers
+Protected Database / API / MCP Server
 ```
 
-Warden exposes one MCP server to the client. It connects to many upstream MCP servers privately and exposes their tools as namespaced tools:
+Warden's core pipeline classifies and governs action attempts. Adapters feed action metadata and arguments into that pipeline:
+
+- TypeScript SDK guard for app backends and agent tool wrappers
+- MCP proxy for MCP clients and upstream MCP servers
+- future HTTP sidecar for non-TypeScript and non-MCP stacks
+
+The MCP adapter exposes namespaced tools:
 
 ```text
 github.create_issue
@@ -148,7 +154,25 @@ Success criteria:
 - agent cannot approve its own call
 - final executed arguments are auditable
 
-### Phase 4: Fake MCP Harness
+### Phase 4: Generic SDK Guard
+
+Goal: make Warden usable without MCP.
+
+Deliverables:
+
+- `guardAction` TypeScript API
+- app/backend action metadata shape
+- database query example
+- tests for read, write, destructive, approval, audit, and executor failure behavior
+
+Success criteria:
+
+- a website chatbot can wrap a database function with Warden
+- SQL reads execute under default policy
+- SQL writes fail closed without approval
+- destructive SQL can be denied before executor invocation
+
+### Phase 5: Fake MCP Harness
 
 Goal: test the product without relying on client-specific behavior.
 
@@ -167,7 +191,7 @@ Success criteria:
 - Warden can classify, approve, deny, forward, and log fake tool calls end to end
 - tests cover the dangerous cases before real MCP plumbing lands
 
-### Phase 5: Real MCP Gateway
+### Phase 6: Real MCP Gateway
 
 Goal: become a real MCP server that proxies one upstream MCP server.
 
@@ -188,7 +212,7 @@ Success criteria:
 - Warden blocks denied calls
 - Warden approval-gates risky calls
 
-### Phase 6: Multi-Upstream Routing
+### Phase 7: Multi-Upstream Routing
 
 Goal: one Warden server governs multiple tool families.
 
@@ -221,7 +245,25 @@ Success criteria:
 - namespaced routing is deterministic
 - policy can target `upstream.tool`
 
-### Phase 7: Codex Integration
+### Phase 8: HTTP Sidecar
+
+Goal: make Warden usable from any language or agent framework.
+
+Deliverables:
+
+- localhost HTTP decision API
+- JSON request/response schema for action metadata and arguments
+- audit-writing decision-only mode
+- optional execute-through mode for configured adapters
+- examples for database-backed chatbot integration
+
+Success criteria:
+
+- a Python, Ruby, Go, or Node app can ask Warden before executing a protected database/API action
+- denied actions never reach the protected executor
+- audit evidence is written for allowed, denied, failed, and approval-required actions
+
+### Phase 9: Codex Integration
 
 Goal: make Warden easy to use with Codex.
 
@@ -249,7 +291,7 @@ Success criteria:
 - protected upstream MCPs are not directly configured
 - `warden doctor codex` warns about direct MCP registrations, exposed env vars, writable policy, and unrestricted network paths
 
-### Phase 8: Claude Code Integration
+### Phase 10: Claude Code Integration
 
 Goal: make Warden easy to use with Claude Code.
 
@@ -283,7 +325,7 @@ Success criteria:
 - team mode has a clear path to exclusive Warden-only MCP loading
 - `warden doctor claude` flags direct `.mcp.json` upstream registrations
 
-### Phase 9: Bypass Resistance
+### Phase 11: Bypass Resistance
 
 Goal: distinguish monitoring from enforcement.
 
@@ -308,7 +350,7 @@ Success criteria:
 - doctor output explains what to fix
 - bypass warnings are actionable
 
-### Phase 10: Local Web UI
+### Phase 12: Local Web UI
 
 Goal: make approvals and audits easier without making the MVP dependent on a browser UI.
 
@@ -326,7 +368,7 @@ Success criteria:
 - local web UI is optional
 - user can inspect tool calls and approvals without reading JSONL
 
-### Phase 11: Team Product
+### Phase 13: Team Product
 
 Goal: turn local Warden into a viable paid product.
 
@@ -349,7 +391,7 @@ Success criteria:
 
 ## MVP We Should Actually Ship
 
-The first public MVP should include Phases 0 through 8, with Phase 9 started.
+The first public MVP should include Phases 0 through 8, with Phase 11 started.
 
 Minimum product:
 
@@ -358,16 +400,16 @@ Minimum product:
 - classifier
 - audit log
 - terminal approval
+- TypeScript SDK guard
+- HTTP decision sidecar
 - real MCP gateway
 - multi-upstream routing
-- Codex setup helper
-- Claude Code setup helper
 - doctor checks for obvious bypass risk
 
 This is enough to prove the product promise:
 
 ```text
-Connect your coding agent to Warden instead of direct tools.
+Put Warden between your agent and your database/API/tool.
 Warden blocks dangerous actions, asks before risky writes, and leaves an audit trail.
 ```
 
@@ -423,4 +465,3 @@ Build these in order:
 8. unit tests
 
 Do not start with the full MCP gateway. Start with the decision loop that every gateway call will depend on.
-

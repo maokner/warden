@@ -19,12 +19,17 @@ The existing ecosystem has many ways to build agents, but fewer practical contro
 
 Warden is a policy and audit layer for agent actions.
 
-The initial product is a proxy that exposes an MCP-compatible endpoint to an AI client and forwards approved calls to one or more underlying MCP servers. Before forwarding, Warden classifies the tool and evaluates the call against policy.
+The product sits between an agent and anything the agent can cause to happen: a database query, internal API call, MCP tool, billing action, file mutation, or production operation. Before forwarding the action, Warden classifies the request and evaluates it against policy.
+
+The first adapters are:
+
+- a TypeScript guard API for app backends and agent tool wrappers
+- an MCP proxy for MCP-compatible clients and upstream MCP servers
 
 ## Core Jobs
 
-1. Discover tools.
-   Warden reads tool metadata from connected MCP servers and builds an inventory.
+1. Inventory tools.
+   Warden reads tool metadata from adapters, SDK calls, and connected MCP servers.
 
 2. Classify risk.
    Warden labels tools and calls by capability: read, write, destructive, external communication, credential access, financial action, code execution, file mutation, network egress, and sensitive-data exposure.
@@ -49,7 +54,8 @@ The platform layer is changing quickly:
 - ChatGPT Apps and MCP make AI-native distribution easier.
 - Codex and similar coding agents can operate local machines and tools.
 - Agent builders are becoming easier and more visual.
-- MCP creates a standard tool layer, which makes a cross-agent control plane possible.
+- Agentic web apps increasingly connect chatbots directly to internal APIs and databases.
+- MCP creates one standard tool layer, while SDK and HTTP adapters let Warden cover non-MCP agents.
 
 As the cost of creating agents falls, the value shifts toward making agents safe enough to connect to real systems.
 
@@ -64,6 +70,7 @@ The later buyer is a security/platform team managing many internal agents, MCP s
 ### Local Developer Edition
 
 - CLI proxy
+- TypeScript guard API
 - YAML policies
 - local audit log
 - terminal approval prompt
@@ -99,4 +106,3 @@ Observability tools show what happened inside LLM calls and traces. Warden contr
 Agent builders help create workflows. Warden makes those workflows governable.
 
 MCP registries help discover tools. Warden decides whether those tools are safe to use in a specific environment.
-

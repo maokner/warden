@@ -4,19 +4,19 @@ This document defines how Warden should behave from the user's point of view.
 
 ## Primary User Story
 
-A developer has an AI agent connected to MCP tools. Some tools are safe to call freely, some mutate state, and some could cause real harm if misused. The developer puts Warden between the agent and the tools so every action is classified, policy-checked, logged, and optionally approved by a human.
+A developer has an AI agent or chatbot connected to real capabilities: database queries, internal APIs, MCP tools, billing actions, or admin operations. Some actions are safe to call freely, some mutate state, and some could cause real harm if misused. The developer puts Warden between the agent and those capabilities so every action is classified, policy-checked, logged, and optionally approved by a human.
 
 ## First-Time Setup
 
 Expected behavior:
 
 1. User installs Warden.
-2. User adds one or more upstream MCP servers.
-3. Warden introspects available tools.
+2. User wraps backend actions with the SDK, configures the MCP proxy, or points a future sidecar at protected actions.
+3. Warden receives action metadata and arguments.
 4. Warden generates an initial policy file.
 5. User edits the policy or accepts defaults.
-6. User points their MCP client at Warden.
-7. Agent continues to see tools, but now calls pass through Warden.
+6. User points the agent or app tool wrapper at Warden.
+7. Agent continues to act through the app, but protected calls pass through Warden.
 
 Default posture:
 
@@ -27,11 +27,11 @@ Default posture:
 - Payment, credential, production database, and bulk-export tools are denied until explicitly configured.
 - Unknown or newly changed tools require review.
 
-## Tool Inventory
+## Action Inventory
 
-When an upstream MCP server exposes tools, Warden should show:
+When an app, SDK wrapper, or upstream MCP server exposes actions, Warden should show:
 
-- server name
+- source or adapter name
 - tool name
 - tool description
 - input schema

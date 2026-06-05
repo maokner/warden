@@ -2,7 +2,7 @@
 
 ## MVP Goal
 
-Build the smallest useful version of Warden that can sit between Codex or Claude Code and upstream MCP tools, classify tool calls, enforce policy, require approval for risky calls, write an audit log, and warn when the environment is only monitoring instead of truly enforced.
+Build the smallest useful version of Warden that can sit between any agent and protected tools, APIs, or databases, classify actions, enforce policy, require approval for risky calls, write an audit log, and warn when the environment is only monitoring instead of truly enforced.
 
 ## Version 0.1
 
@@ -16,6 +16,7 @@ Build the smallest useful version of Warden that can sit between Codex or Claude
 - JSONL audit log: built
 - terminal approval prompt: built
 - fake MCP harness for end-to-end tests: built
+- TypeScript SDK guard for backend functions: built
 - MCP proxy for one upstream MCP server
 - multi-upstream routing after the single-upstream path works
 - tool inventory
@@ -86,10 +87,10 @@ warden setup claude
 ## Architecture
 
 ```text
-AI Client
+AI Agent / Chatbot / MCP Client
    |
    v
-Warden MCP Endpoint
+App SDK Guard / Warden MCP Endpoint / Future HTTP Sidecar
    |
    +-- Tool Inventory
    +-- Risk Classifier
@@ -98,7 +99,7 @@ Warden MCP Endpoint
    +-- Audit Logger
    |
    v
-Upstream MCP Servers
+Protected Database / API / MCP Server
 ```
 
 ## Initial Implementation Decisions
@@ -108,7 +109,7 @@ Upstream MCP Servers
 - Store policy as YAML.
 - Keep the approval flow terminal-based for v0.1.
 - Use deterministic classification first. Add model-assisted classification only after the policy engine is solid.
-- Start with the policy/classifier/audit loop before real MCP protocol work.
+- Start with the policy/classifier/audit loop before adapter-specific protocol work.
 - Treat environments as `monitoring_only` unless Warden owns credentials, policy, audit storage, and the route to protected tools.
 
 ## Success Criteria
@@ -116,16 +117,16 @@ Upstream MCP Servers
 Warden v0.1 is useful if a developer can:
 
 1. Run `warden policy test` against sample calls.
-2. Connect Warden to at least one real MCP server.
-3. Point Codex or Claude Code at Warden.
-4. See all discovered tools and risk labels.
-5. Allow read-only calls without friction.
-6. Stop destructive calls by default.
-7. Approve a write call intentionally.
-8. Review an audit log that explains what happened.
+2. Wrap a database or internal API action with `guardAction`.
+3. Allow read-only calls without friction.
+4. Stop destructive calls by default.
+5. Approve a write call intentionally.
+6. Review an audit log that explains what happened.
+7. Connect Warden to at least one real MCP server.
+8. See all discovered tools and risk labels.
 9. Run `warden doctor` and see whether the setup is monitoring-only or enforced.
 
-Current gap: `warden proxy` still needs model-driven Claude Code testing plus denied and approval-required client smoke tests.
+Current gap: non-TypeScript apps need a language-neutral local HTTP sidecar, and database policy needs stronger SQL-specific controls.
 
 ## Approval MVP
 
