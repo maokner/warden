@@ -37,31 +37,50 @@ The examples below call `warden`. From a local clone that's `node dist/src/cli/i
 
 ## Use it
 
-Warden offers three ways to put a boundary in front of your tools. Pick whichever fits your stack.
+Warden offers a few ways to put a boundary in front of your tools. Pick whichever fits your stack.
 
-### 1. In a TypeScript backend
+### 1. Around your OpenAI Agents SDK tools
 
-Wrap any function an agent can trigger with `guardAction`:
+`guardTools` wraps your tool definitions so every call is classified, policy-checked, audited, and (if required) approved — one line, no other changes. A blocked call comes back to the model as a readable message instead of running.
 
 ```ts
-import { defaultPolicyConfig, guardAction } from "warden";
+import { tool } from "@openai/agents";
+import { configureWarden } from "warden";
+import { guardTools } from "warden/openai";
 
-const policy = defaultPolicyConfig();
+configureWarden(); // secure defaults; loads warden.yaml if present
 
-const result = await guardAction({
-  config: policy,
-  tool: "database.run_sql",
-  description: "Run SQL against the production database",
-  arguments: { sql: "drop table users" },
-  execute: async (args) => db.query(String(args.sql)),
-});
+const tools = guardTools([
+  {
+    name: "issue_refund",
+    description: "Refund a payment",
+    parameters: refundSchema,
+    execute: async ({ paymentId, amount }) => stripe.refunds.create({ paymentId, amount }),
+  },
+]).map(tool);
 
-if (!result.executed) {
-  throw new Error(result.error); // destructive SQL is denied before db.query runs
-}
+const agent = new Agent({ name: "support", tools });
 ```
 
-### 2. As an MCP gateway
+Wrap the whole array, not one tool at a time — that's how coverage stays complete.
+
+### 2. Any function, anywhere
+
+`guard` wraps a single function and returns one with the same signature; it throws if the call is blocked.
+
+```ts
+import { configureWarden, guard } from "warden";
+
+configureWarden();
+
+const runSql = guard("database.run_sql", (args) => db.query(String(args.sql)), {
+  description: "Run SQL against the production database",
+});
+
+await runSql({ sql: "drop table users" }); // throws: destructive SQL is denied before db.query runs
+```
+
+### 3. As an MCP gateway
 
 Add upstream MCP servers to `warden.yaml`, then run Warden as a single MCP server your agent connects to. Warden namespaces and policies every upstream tool, and prompts for risky calls on the terminal.
 
@@ -75,7 +94,7 @@ Generate the client config snippet:
 warden setup claude --config warden.yaml   # or: warden setup codex
 ```
 
-### 3. As a local HTTP sidecar
+### 4. As a local HTTP sidecar
 
 For non-TypeScript or non-MCP stacks, ask Warden for a decision over localhost:
 
@@ -110,20 +129,44 @@ tools:               # override decisions for specific tools
 redaction:           # fields scrubbed from audit logs
   fields: [password, token, api_key, secret]
 
+approval:            # how approval-required actions are handled
+  method: local      # deny | local | callback
+  timeout: 1m        # none | 30s | 1m | 5m | 30m | 1h
+
 audit:
   path: .warden/audit.jsonl
 ```
 
 A `deny` from a risk default always wins — a tool-specific rule can't weaken it.
 
+## Approvals
+
+When a call needs approval, Warden stalls it until the timeout, then fails closed. How a human responds is the `approval.method`:
+
+- **`deny`** — never approves; the action is refused with a clear message. Zero setup, fully fail-closed.
+- **`local`** — opens a localhost approval inbox (a web page and a JSON API) in your app's process. Approve from the browser, or from the CLI:
+  ```bash
+  warden approvals          # list what's waiting
+  warden approve <id>       # or: warden deny <id>
+  ```
+- **`callback`** — you wire your own UI/Slack/on-call by passing a function:
+  ```ts
+  configureWarden({ approval: { onApproval: async (req) => ({ decision: "approve", approver: "you" }) } });
+  ```
+
+Long timeouts assume a background/async agent — a synchronous chat request usually can't hold the connection open, so keep those short or use `callback`.
+
 ## CLI
 
 ```
 warden init [--path warden.yaml] [--template default|database]
+            [--approval-method deny|local|callback] [--approval-timeout 1m]
 warden policy test <call.json> [--config warden.yaml] [--json]
 warden inspect --config warden.yaml          # list upstream tools + their decisions
 warden proxy --config warden.yaml            # run the MCP gateway
 warden serve --config warden.yaml            # run the HTTP decision sidecar
+warden approvals [--json]                    # list pending approvals (local method)
+warden approve <id> / warden deny <id>       # resolve a pending approval
 warden audit tail [--limit 20] [--json]      # read the audit log
 warden doctor [--config warden.yaml]         # check for ways an agent could bypass Warden
 warden exec --config warden.yaml -- <cmd>    # launch a process with credentials scrubbed

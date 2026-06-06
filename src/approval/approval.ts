@@ -11,6 +11,7 @@ export interface CreateApprovalRequestInput {
   call: ToolCall;
   decision: PolicyDecision;
   redactionFields: string[];
+  defaultTimeoutSeconds?: number;
   now?: Date;
 }
 
@@ -48,7 +49,10 @@ export interface ApprovalResolution {
 export function createApprovalRequest(
   input: CreateApprovalRequestInput,
 ): ApprovalRequest {
-  const timeoutSeconds = input.decision.approval?.timeoutSeconds ?? 120;
+  const timeoutSeconds =
+    input.decision.approval?.timeoutSeconds ??
+    input.defaultTimeoutSeconds ??
+    120;
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + timeoutSeconds * 1000);
   const redacted = redactArguments(input.call.arguments, input.redactionFields);

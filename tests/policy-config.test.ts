@@ -110,3 +110,31 @@ upstreams:
     /transport must be "stdio"/,
   );
 });
+
+test("parsePolicyConfig parses the approval block with presets", () => {
+  const config = parsePolicyConfig(`
+approval:
+  method: local
+  timeout: 5m
+`);
+
+  assert.equal(config.approval.method, "local");
+  assert.equal(config.approval.timeoutSeconds, 300);
+});
+
+test("parsePolicyConfig defaults approval to deny with a 60s timeout", () => {
+  const config = parsePolicyConfig(`
+defaults:
+  read: allow
+`);
+
+  assert.equal(config.approval.method, "deny");
+  assert.equal(config.approval.timeoutSeconds, 60);
+});
+
+test("parsePolicyConfig rejects an invalid approval method", () => {
+  assert.throws(
+    () => parsePolicyConfig(`approval:\n  method: email\n`),
+    /approval\.method/,
+  );
+});

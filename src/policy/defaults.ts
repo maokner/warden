@@ -27,6 +27,8 @@ export const DEFAULT_REDACTION_FIELDS = [
 
 export const DEFAULT_AUDIT_PATH = ".warden/audit.jsonl";
 
+export const DEFAULT_APPROVAL_TIMEOUT_SECONDS = 60;
+
 export function defaultPolicyConfig(): PolicyConfig {
   return {
     defaults: { ...DEFAULT_DECISIONS },
@@ -36,5 +38,9 @@ export function defaultPolicyConfig(): PolicyConfig {
     },
     auditPath: DEFAULT_AUDIT_PATH,
     upstreams: {},
+    approval: {
+      method: "deny",
+      timeoutSeconds: DEFAULT_APPROVAL_TIMEOUT_SECONDS,
+    },
   };
 }

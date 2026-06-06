@@ -12,12 +12,13 @@ import {
   type HandleToolCallResult,
   type ToolExecutor,
 } from "../pipeline/handle-tool-call.js";
+import { peekWardenRuntime } from "./runtime.js";
 
 export interface GuardActionInput {
-  config: PolicyConfig;
   tool: string;
   arguments: JsonObject;
   execute: (args: JsonObject) => Promise<JsonValue> | JsonValue;
+  config?: PolicyConfig;
   description?: string;
   inputSchema?: JsonObject;
   annotations?: JsonObject;
@@ -29,6 +30,8 @@ export interface GuardActionInput {
   agent?: string;
   user?: string;
   summarizeOutput?: (output: JsonValue) => string;
+  /** Upstream used to namespace a bare tool name. Defaults to "app". */
+  defaultUpstream?: string;
 }
 
 export type GuardActionResult = HandleToolCallResult;
@@ -36,7 +39,17 @@ export type GuardActionResult = HandleToolCallResult;
 export async function guardAction(
   input: GuardActionInput,
 ): Promise<GuardActionResult> {
-  const ref = parseToolRef(input.tool);
+  const runtime = peekWardenRuntime();
+  const config = input.config ?? runtime?.config;
+  if (!config) {
+    throw new Error(
+      "Warden has no policy config. Pass `config` or call configureWarden() first.",
+    );
+  }
+
+  const ref = parseToolRef(
+    ensureNamespaced(input.tool, input.defaultUpstream ?? "app"),
+  );
   const metadata: ToolMetadata = {
     ref,
     description: input.description ?? "",
@@ -76,16 +89,59 @@ export async function guardAction(
     },
   };
 
-  const pipelineInput = {
-    config: input.config,
-    call,
-    executor,
-  };
-
-  assignIfPresent(pipelineInput, "reviewer", input.reviewer);
-  assignIfPresent(pipelineInput, "auditPath", input.auditPath);
+  const pipelineInput = { config, call, executor };
+  assignIfPresent(pipelineInput, "reviewer", input.reviewer ?? runtime?.reviewer);
+  assignIfPresent(pipelineInput, "auditPath", input.auditPath ?? runtime?.auditPath);
 
   return handleToolCall(pipelineInput);
+}
+
+export type GuardOptions = Omit<
+  GuardActionInput,
+  "tool" | "arguments" | "execute"
+>;
+
+/**
+ * Wraps a function so every call is policy-checked, audited, and (if required)
+ * approved. The returned function keeps the original signature and return
+ * value; it throws WardenBlockedError when the call is denied or unapproved.
+ */
+export function guard<A extends JsonObject = JsonObject, R extends JsonValue = JsonValue>(
+  tool: string,
+  fn: (args: A) => Promise<R> | R,
+  options: GuardOptions = {},
+): (args: A) => Promise<R> {
+  return async (args: A) => {
+    const result = await guardAction({
+      ...options,
+      tool,
+      arguments: args,
+      execute: (executionArgs) => fn(executionArgs as A),
+    });
+
+    if (!result.executed) {
+      throw new WardenBlockedError(result);
+    }
+
+    return result.output as R;
+  };
+}
+
+export class WardenBlockedError extends Error {
+  readonly result: HandleToolCallResult;
+
+  constructor(result: HandleToolCallResult) {
+    super(
+      `Warden blocked ${result.auditEvent.tool}: ${result.error ?? result.decision.reason}`,
+    );
+    this.name = "WardenBlockedError";
+    this.result = result;
+  }
+}
+
+function ensureNamespaced(tool: string, defaultUpstream: string): string {
+  const trimmed = tool.trim();
+  return trimmed.includes(".") ? trimmed : `${defaultUpstream}.${trimmed}`;
 }
 
 function summarizeJson(value: JsonValue): string {

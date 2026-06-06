@@ -15,6 +15,14 @@ import { parseToolRef } from "../domain/tool-ref.js";
 import { evaluatePolicy } from "../policy/engine.js";
 import { hashPolicyConfig } from "../policy/hash.js";
 import { redactArguments } from "../policy/redaction.js";
+import {
+  assignIfPresent,
+  expectObject,
+  HttpError,
+  readJsonBody,
+  writeError,
+  writeJson,
+} from "./util.js";
 
 export interface HttpDecisionRequest {
   tool: string;
@@ -176,7 +184,7 @@ async function handleHttpRequest(
     return;
   }
 
-  const rawBody = await readJsonBody(request, maxBodyBytes);
+  const rawBody = await readJsonBody(request, { maxBytes: maxBodyBytes });
   const decisionRequest = normalizeDecisionRequest(rawBody);
   const result = decideHttpAction({
     config: options.config,
@@ -229,34 +237,6 @@ function finalizeDecision(args: {
   assignIfPresent(response, "forwardArguments", args.forwardArguments);
   assignIfPresent(response, "error", args.error);
   return response;
-}
-
-async function readJsonBody(
-  request: IncomingMessage,
-  maxBodyBytes: number,
-): Promise<unknown> {
-  const chunks: Buffer[] = [];
-  let totalBytes = 0;
-
-  for await (const chunk of request) {
-    const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(String(chunk));
-    totalBytes += buffer.length;
-    if (totalBytes > maxBodyBytes) {
-      throw new HttpError(413, "Request body is too large.");
-    }
-    chunks.push(buffer);
-  }
-
-  const body = Buffer.concat(chunks).toString("utf8");
-  if (!body.trim()) {
-    throw new HttpError(400, "Request body is required.");
-  }
-
-  try {
-    return JSON.parse(body) as unknown;
-  } catch {
-    throw new HttpError(400, "Request body must be valid JSON.");
-  }
 }
 
 function normalizeDecisionRequest(value: unknown): HttpDecisionRequest {
@@ -347,69 +327,4 @@ function normalizeOptionalString(
   }
 
   return value;
-}
-
-function expectObject(value: unknown, path: string): JsonObject {
-  if (
-    typeof value !== "object" ||
-    value === null ||
-    Array.isArray(value)
-  ) {
-    throw new HttpError(400, `${path} must be an object.`);
-  }
-
-  return value as JsonObject;
-}
-
-function writeJson(
-  response: ServerResponse,
-  statusCode: number,
-  value: unknown,
-): void {
-  response.writeHead(statusCode, {
-    "Content-Type": "application/json; charset=utf-8",
-  });
-  response.end(`${JSON.stringify(value)}\n`);
-}
-
-function writeError(response: ServerResponse, error: unknown): void {
-  if (response.headersSent) {
-    response.end();
-    return;
-  }
-
-  if (error instanceof HttpError) {
-    writeJson(response, error.statusCode, {
-      error: error.code,
-      message: error.message,
-    });
-    return;
-  }
-
-  writeJson(response, 500, {
-    error: "internal_error",
-    message: error instanceof Error ? error.message : String(error),
-  });
-}
-
-class HttpError extends Error {
-  readonly statusCode: number;
-  readonly code: string;
-
-  constructor(statusCode: number, message: string) {
-    super(message);
-    this.name = "HttpError";
-    this.statusCode = statusCode;
-    this.code = statusCode === 413 ? "payload_too_large" : "bad_request";
-  }
-}
-
-function assignIfPresent<T extends object, K extends string, V>(
-  target: T,
-  key: K,
-  value: V | undefined,
-): asserts target is T & Record<K, V> {
-  if (value !== undefined) {
-    Object.assign(target, { [key]: value });
-  }
 }

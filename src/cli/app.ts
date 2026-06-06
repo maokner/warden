@@ -41,6 +41,13 @@ import { createHttpDecisionServer } from "../http/sidecar.js";
 import { McpGateway } from "../mcp/gateway.js";
 import { LineJsonRpcPeer } from "../mcp/line-json-rpc.js";
 import { createStdioUpstreams } from "../mcp/upstream.js";
+import {
+  DEFAULT_APPROVAL_HOST,
+  DEFAULT_APPROVAL_PORT,
+} from "../approval/server.js";
+import { parseTimeout, TIMEOUT_PRESET_NAMES } from "../approval/methods.js";
+import { APPROVAL_METHODS } from "../domain/types.js";
+import type { PendingApprovalView } from "../approval/queue.js";
 
 export interface CliIo {
   cwd: string;
@@ -63,6 +70,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         return runPolicy(rest, io);
       case "audit":
         return runAudit(rest, io);
+      case "approvals":
+        return await runApprovals(rest, io);
+      case "approve":
+        return await runApprovalDecision("approve", rest, io);
+      case "deny":
+        return await runApprovalDecision("reject", rest, io);
       case "doctor":
         return runDoctorCommand(rest, io);
       case "inspect":
@@ -104,9 +117,39 @@ function runInit(args: string[], io: CliIo): number {
     return 1;
   }
 
-  writeFileSync(outputPath, policyTemplate(templateName));
+  const template = applyApprovalOverrides(
+    policyTemplate(templateName),
+    options.value("--approval-method"),
+    options.value("--approval-timeout"),
+  );
+
+  writeFileSync(outputPath, template);
   io.stdout(`Created ${outputPath} from ${templateName} template\n`);
   return 0;
+}
+
+function applyApprovalOverrides(
+  template: string,
+  method: string | undefined,
+  timeout: string | undefined,
+): string {
+  let result = template;
+
+  if (method !== undefined) {
+    if (!APPROVAL_METHODS.includes(method as never)) {
+      throw new Error(
+        `--approval-method must be one of: ${APPROVAL_METHODS.join(", ")}.`,
+      );
+    }
+    result = result.replace(/method: \w+/, `method: ${method}`);
+  }
+
+  if (timeout !== undefined) {
+    parseTimeout(timeout); // validates preset name or seconds, throws otherwise
+    result = result.replace(/timeout: \S+/, `timeout: ${timeout}`);
+  }
+
+  return result;
 }
 
 function runPolicy(args: string[], io: CliIo): number {
@@ -202,6 +245,109 @@ function runAudit(args: string[], io: CliIo): number {
   }
 
   return 0;
+}
+
+async function runApprovals(args: string[], io: CliIo): Promise<number> {
+  const options = parseOptions(args);
+  const baseUrl = approvalBaseUrl(options);
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/approvals`);
+  } catch {
+    io.stderr(approvalUnreachable(baseUrl));
+    return 1;
+  }
+
+  if (!response.ok) {
+    io.stderr(`Approval inbox returned HTTP ${response.status}.\n`);
+    return 1;
+  }
+
+  const body = (await response.json()) as { approvals: PendingApprovalView[] };
+  const approvals = body.approvals ?? [];
+
+  if (options.has("--json")) {
+    io.stdout(`${JSON.stringify(approvals, null, 2)}\n`);
+    return 0;
+  }
+
+  if (approvals.length === 0) {
+    io.stdout("No pending approvals.\n");
+    return 0;
+  }
+
+  for (const approval of approvals) {
+    io.stdout(
+      `${approval.id} ${approval.tool} risks=${approval.riskLabels.join(",")} expires=${approval.expiresAt}\n`,
+    );
+  }
+
+  return 0;
+}
+
+async function runApprovalDecision(
+  action: "approve" | "reject",
+  args: string[],
+  io: CliIo,
+): Promise<number> {
+  const options = parseOptions(args);
+  const id = options.positionals[0];
+  const command = action === "approve" ? "approve" : "deny";
+
+  if (!id) {
+    io.stderr(
+      `Usage: warden ${command} <id> [--url http://127.0.0.1:${DEFAULT_APPROVAL_PORT}] [--reason ...] [--approver ...]\n`,
+    );
+    return 1;
+  }
+
+  const baseUrl = approvalBaseUrl(options);
+  const body: JsonObject = {};
+  const reason = options.value("--reason");
+  const approver = options.value("--approver");
+  if (reason) {
+    body["reason"] = reason;
+  }
+  if (approver) {
+    body["approver"] = approver;
+  }
+
+  let response: Response;
+  try {
+    response = await fetch(`${baseUrl}/approvals/${encodeURIComponent(id)}/${action}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    io.stderr(approvalUnreachable(baseUrl));
+    return 1;
+  }
+
+  if (response.status === 404) {
+    io.stderr(`No pending approval with id ${id} (it may have expired).\n`);
+    return 1;
+  }
+
+  if (!response.ok) {
+    io.stderr(`Approval inbox returned HTTP ${response.status}.\n`);
+    return 1;
+  }
+
+  io.stdout(`${action === "approve" ? "Approved" : "Denied"} ${id}\n`);
+  return 0;
+}
+
+function approvalBaseUrl(options: { value: (name: string) => string | undefined }): string {
+  return (
+    options.value("--url") ??
+    `http://${DEFAULT_APPROVAL_HOST}:${DEFAULT_APPROVAL_PORT}`
+  );
+}
+
+function approvalUnreachable(baseUrl: string): string {
+  return `Could not reach the Warden approval inbox at ${baseUrl}. Start an app configured with approval method "local" (or run "warden serve").\n`;
 }
 
 function runDoctorCommand(args: string[], io: CliIo): number {
@@ -728,8 +874,12 @@ function helpText(): string {
 
 Commands:
   warden init [--path warden.yaml] [--template ${policyTemplateNames().join("|")}] [--force]
+              [--approval-method ${APPROVAL_METHODS.join("|")}] [--approval-timeout ${TIMEOUT_PRESET_NAMES.join("|")}]
   warden policy test <call.json> [--config warden.yaml] [--json] [--audit]
   warden audit tail [--path .warden/audit.jsonl] [--limit 20] [--json]
+  warden approvals [--url http://127.0.0.1:${DEFAULT_APPROVAL_PORT}] [--json]
+  warden approve <id> [--url ...] [--reason ...] [--approver ...]
+  warden deny <id> [--url ...] [--reason ...]
   warden doctor [--config warden.yaml] [--json]
   warden inspect --config warden.yaml [--json]
   warden setup codex|claude [--config /path/to/warden.yaml]

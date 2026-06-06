@@ -35,6 +35,14 @@ export type EnvironmentStatus =
   | "partially_enforced"
   | "enforced";
 
+export const APPROVAL_METHODS = ["deny", "local", "callback"] as const;
+export type ApprovalMethod = (typeof APPROVAL_METHODS)[number];
+
+export interface GlobalApprovalConfig {
+  method: ApprovalMethod;
+  timeoutSeconds: number;
+}
+
 export interface ToolRef {
   upstream: string;
   name: string;
@@ -86,6 +94,7 @@ export interface PolicyConfig {
   redaction: RedactionConfig;
   auditPath: string;
   upstreams: Record<string, UpstreamConfig>;
+  approval: GlobalApprovalConfig;
 }
 
 export interface UpstreamConfig {

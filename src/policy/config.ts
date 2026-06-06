@@ -1,16 +1,20 @@
 import { readFileSync } from "node:fs";
 import { parse } from "yaml";
 import {
+  APPROVAL_METHODS,
   DECISION_TYPES,
   RISK_LABELS,
+  type ApprovalMethod,
   type ApprovalPolicy,
   type DecisionType,
+  type GlobalApprovalConfig,
   type JsonObject,
   type PolicyConfig,
   type RiskLabel,
   type ToolPolicy,
   type UpstreamConfig,
 } from "../domain/types.js";
+import { parseTimeout } from "../approval/methods.js";
 import { defaultPolicyConfig } from "./defaults.js";
 
 export function loadPolicyConfig(path: string): PolicyConfig {
@@ -37,7 +41,43 @@ export function normalizePolicyConfig(value: unknown): PolicyConfig {
     redaction: normalizeRedaction(root["redaction"], base.redaction.fields),
     auditPath: normalizeAuditPath(root["audit"], base.auditPath),
     upstreams: normalizeUpstreams(root["upstreams"]),
+    approval: normalizeGlobalApproval(root["approval"], base.approval),
   };
+}
+
+function normalizeGlobalApproval(
+  value: unknown,
+  base: GlobalApprovalConfig,
+): GlobalApprovalConfig {
+  if (value === undefined) {
+    return { ...base };
+  }
+
+  const object = expectObject(value, "approval");
+  const result: GlobalApprovalConfig = { ...base };
+
+  if (object["method"] !== undefined) {
+    const method = object["method"];
+    if (
+      typeof method !== "string" ||
+      !APPROVAL_METHODS.includes(method as ApprovalMethod)
+    ) {
+      throw new Error(
+        `approval.method must be one of: ${APPROVAL_METHODS.join(", ")}.`,
+      );
+    }
+    result.method = method as ApprovalMethod;
+  }
+
+  if (object["timeout"] !== undefined) {
+    const timeout = object["timeout"];
+    if (typeof timeout !== "string" && typeof timeout !== "number") {
+      throw new Error("approval.timeout must be a preset name or seconds.");
+    }
+    result.timeoutSeconds = parseTimeout(timeout);
+  }
+
+  return result;
 }
 
 function normalizeDefaults(

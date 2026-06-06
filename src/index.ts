@@ -1,5 +1,8 @@
 export * from "./audit/logger.js";
 export * from "./approval/approval.js";
+export * from "./approval/methods.js";
+export * from "./approval/queue.js";
+export * from "./approval/server.js";
 export * from "./approval/terminal.js";
 export * from "./classify/classifier.js";
 export * from "./domain/tool-ref.js";
@@ -20,4 +23,6 @@ export * from "./policy/hash.js";
 export * from "./policy/redaction.js";
 export * from "./pipeline/handle-tool-call.js";
 export * from "./sdk/guard.js";
+export * from "./sdk/runtime.js";
+export * from "./adapters/openai.js";
 export * from "./tool-call/fixture.js";

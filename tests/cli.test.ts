@@ -7,9 +7,15 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import type { AddressInfo } from "node:net";
+import type { Server } from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCli } from "../src/cli/app.js";
+import { createApprovalRequest, resolveApproval } from "../src/approval/approval.js";
+import { ApprovalQueue } from "../src/approval/queue.js";
+import { createApprovalServer } from "../src/approval/server.js";
+import { makeToolRef } from "../src/domain/tool-ref.js";
 
 test("CLI init creates a policy and refuses accidental overwrite", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
@@ -407,6 +413,83 @@ function restoreEnv(key: string, value: string | undefined): void {
   }
 
   process.env[key] = value;
+}
+
+test("CLI init applies approval method and timeout overrides", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    const code = await runCli(
+      ["init", "--approval-method", "local", "--approval-timeout", "30s"],
+      { cwd: dir, ...output.io },
+    );
+    const policy = readFileSync(join(dir, "warden.yaml"), "utf8");
+
+    assert.equal(code, 0);
+    assert.match(policy, /method: local/);
+    assert.match(policy, /timeout: 30s/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI approvals lists pending approvals and approve resolves them", async () => {
+  const queue = new ApprovalQueue();
+  const server = createApprovalServer({ queue });
+  const port = await listenOnPort(server);
+  const url = `http://127.0.0.1:${port}`;
+
+  const ref = makeToolRef("db", "run_sql");
+  const request = createApprovalRequest({
+    call: {
+      ref,
+      arguments: { sql: "update users set x = 1" },
+      metadata: { ref, description: "", inputSchema: {}, annotations: {} },
+    },
+    decision: {
+      decision: "require_approval",
+      reason: "needs review",
+      rule: "defaults.write",
+      riskLabels: ["write"],
+      approval: { timeoutSeconds: 60 },
+    },
+    redactionFields: [],
+  });
+  const resolution = resolveApproval(request, queue);
+  await new Promise((resolve) => setImmediate(resolve));
+
+  try {
+    const listOutput = createOutput();
+    const listCode = await runCli(["approvals", "--url", url], {
+      cwd: process.cwd(),
+      ...listOutput.io,
+    });
+    assert.equal(listCode, 0);
+    assert.match(listOutput.stdout(), /db\.run_sql/);
+
+    const approveOutput = createOutput();
+    const approveCode = await runCli(
+      ["approve", request.id, "--url", url, "--approver", "alice"],
+      { cwd: process.cwd(), ...approveOutput.io },
+    );
+    assert.equal(approveCode, 0);
+    assert.match(approveOutput.stdout(), /Approved/);
+
+    const result = await resolution;
+    assert.equal(result.status, "approved");
+    assert.equal(result.approver, "alice");
+  } finally {
+    server.close();
+  }
+});
+
+function listenOnPort(server: Server): Promise<number> {
+  return new Promise((resolve) => {
+    server.listen(0, "127.0.0.1", () => {
+      resolve((server.address() as AddressInfo).port);
+    });
+  });
 }
 
 function createOutput(): {

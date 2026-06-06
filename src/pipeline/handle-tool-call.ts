@@ -99,6 +99,7 @@ export async function handleToolCall(
       call: input.call,
       decision,
       redactionFields: input.config.redaction.fields,
+      defaultTimeoutSeconds: input.config.approval.timeoutSeconds,
     };
     if (input.now) {
       Object.assign(approvalInput, { now: input.now });

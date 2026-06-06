@@ -29,6 +29,13 @@ redaction:
     - authorization
     - cookie
 
+# How approval-required actions are handled.
+#   method:  deny | local | callback
+#   timeout: none | 30s | 1m | 5m | 30m | 1h
+approval:
+  method: deny
+  timeout: 1m
+
 audit:
   path: .warden/audit.jsonl
 `;
@@ -87,6 +94,13 @@ redaction:
     - pgpassword
     - mysql_pwd
     - uri
+
+# How approval-required actions are handled.
+#   method:  deny | local | callback
+#   timeout: none | 30s | 1m | 5m | 30m | 1h
+approval:
+  method: local
+  timeout: 5m
 
 audit:
   path: .warden/audit.jsonl
