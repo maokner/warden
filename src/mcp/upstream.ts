@@ -1,6 +1,7 @@
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolve } from "node:path";
 import type { JsonObject, JsonValue, UpstreamConfig } from "../domain/types.js";
+import { scrubEnvironment } from "../env/protection.js";
 import { JSON_RPC_ERROR, JsonRpcProtocolError } from "./json-rpc.js";
 import { LineJsonRpcPeer } from "./line-json-rpc.js";
 import type { McpTool, McpToolCallResult, McpToolsListResult } from "./types.js";
@@ -31,7 +32,7 @@ export class StdioMcpUpstreamClient implements McpUpstream {
 
     const child = spawn(this.config.command, this.config.args, {
       cwd: this.config.cwd ? resolve(this.config.cwd) : undefined,
-      env: { ...process.env, ...this.config.env },
+      env: { ...scrubEnvironment(process.env), ...this.config.env },
       stdio: ["pipe", "pipe", "pipe"],
     });
 

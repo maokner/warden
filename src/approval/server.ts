@@ -154,14 +154,25 @@ async function load() {
     return '<div class="card"><div class="tool">' + esc(a.tool) + '</div>' +
       '<div class="meta">' + risks + ' rule: ' + esc(a.policyRule) + ' · expires ' + esc(a.expiresAt) + '</div>' +
       '<pre>' + args + '</pre>' +
-      '<button class="approve" data-id="' + id + '" data-action="approve">Approve</button>' +
+      (a.requiresReason ? '<div class="meta">Reason required for approval.</div>' : '') +
+      '<button class="approve" data-id="' + id + '" data-action="approve" data-requires-reason="' + (a.requiresReason ? '1' : '0') + '">Approve</button>' +
       '<button class="reject" data-id="' + id + '" data-action="reject">Reject</button></div>';
   }).join("");
 }
 root.addEventListener("click", async function (e) {
   const btn = e.target.closest("button[data-id]");
   if (!btn) return;
-  await fetch("/approvals/" + encodeURIComponent(btn.getAttribute("data-id")) + "/" + btn.getAttribute("data-action"), { method: "POST" });
+  const body = {};
+  if (btn.getAttribute("data-requires-reason") === "1") {
+    const reason = prompt("Reason for approval");
+    if (!reason) return;
+    body.reason = reason;
+  }
+  await fetch("/approvals/" + encodeURIComponent(btn.getAttribute("data-id")) + "/" + btn.getAttribute("data-action"), {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body)
+  });
   load();
 });
 load();

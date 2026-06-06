@@ -443,7 +443,7 @@ function approvalBaseUrl(options: { value: (name: string) => string | undefined 
 }
 
 function approvalUnreachable(baseUrl: string): string {
-  return `Could not reach the Warden approval inbox at ${baseUrl}. Start an app configured with approval method "local" (or run "warden serve").\n`;
+  return `Could not reach the Warden approval inbox at ${baseUrl}. Start an app configured with approval method "local"; the inbox runs inside that app process.\n`;
 }
 
 function runDoctorCommand(args: string[], io: CliIo): number {
@@ -975,7 +975,7 @@ Commands:
   warden audit tail [--path .warden/audit.jsonl] [--limit 20] [--json]
   warden approvals [--url http://127.0.0.1:${DEFAULT_APPROVAL_PORT}] [--json]
   warden approve <id> [--url ...] [--reason ...] [--approver ...]
-  warden deny <id> [--url ...] [--reason ...]
+  warden deny <id> [--url ...] [--reason ...] [--approver ...]
   warden doctor [--config warden.yaml] [--json]
   warden inspect --config warden.yaml [--json]
   warden setup codex|claude [--config /path/to/warden.yaml]

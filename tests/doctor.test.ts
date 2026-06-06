@@ -172,6 +172,39 @@ test("runDoctor flags direct SDK imports and protected hostnames", () => {
   }
 });
 
+test("runDoctor skips test and example directories during bypass scans", () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-doctor-"));
+
+  try {
+    mkdirSync(join(dir, "tests"));
+    mkdirSync(join(dir, "examples"));
+    writeFileSync(
+      join(dir, "tests", "client.ts"),
+      'import OpenAI from "openai";\nconst url = "https://api.openai.com/v1/responses";\n',
+    );
+    writeFileSync(
+      join(dir, "examples", "client.ts"),
+      'import OpenAI from "openai";\nconst url = "https://api.openai.com/v1/responses";\n',
+    );
+
+    const report = runDoctor(dir);
+
+    assert.equal(report.status, "partially_enforced");
+    assert.equal(
+      report.issues.some((issue) => issue.code === "direct_sdk_import"),
+      false,
+    );
+    assert.equal(
+      report.issues.some(
+        (issue) => issue.code === "protected_hostname_reference",
+      ),
+      false,
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runDoctor flags protected entries in env files", () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-doctor-"));
 

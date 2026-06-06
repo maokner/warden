@@ -2,7 +2,7 @@ import type { ApprovalRequest, JsonObject } from "../domain/types.js";
 import type { ApprovalAction, ApprovalReviewer } from "./approval.js";
 
 export const TIMEOUT_PRESETS: Record<string, number> = {
-  none: 0,
+  "0s": 0,
   "30s": 30,
   "1m": 60,
   "5m": 300,
@@ -13,7 +13,7 @@ export const TIMEOUT_PRESETS: Record<string, number> = {
 export const TIMEOUT_PRESET_NAMES = Object.keys(TIMEOUT_PRESETS);
 
 /**
- * Accepts a preset name (none/30s/1m/5m/30m/1h) or a non-negative integer
+ * Accepts a preset name (0s/30s/1m/5m/30m/1h) or a non-negative integer
  * number of seconds. Returns seconds.
  */
 export function parseTimeout(value: string | number): number {

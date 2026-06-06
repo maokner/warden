@@ -10,6 +10,7 @@ export interface PendingApprovalView {
   createdAt: string;
   expiresAt: string;
   displayArguments: JsonObject;
+  requiresReason: boolean;
 }
 
 interface PendingApproval {
@@ -52,6 +53,7 @@ export class ApprovalQueue implements ApprovalReviewer {
       createdAt: entry.request.createdAt,
       expiresAt: entry.request.expiresAt,
       displayArguments: entry.request.displayArguments,
+      requiresReason: entry.request.approval?.requireReason === true,
     }));
   }
 

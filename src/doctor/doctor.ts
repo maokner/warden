@@ -51,6 +51,11 @@ const SKIPPED_DIRECTORIES = new Set([
   ".next",
   ".turbo",
   ".warden",
+  "__tests__",
+  "example",
+  "examples",
+  "test",
+  "tests",
 ]);
 
 const SCANNED_EXTENSIONS = new Set([

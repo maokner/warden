@@ -10,7 +10,7 @@ import type { ApprovalRequest } from "../src/domain/types.js";
 const fakeRequest = {} as unknown as ApprovalRequest;
 
 test("parseTimeout maps presets and integers", () => {
-  assert.equal(parseTimeout("none"), 0);
+  assert.equal(parseTimeout("0s"), 0);
   assert.equal(parseTimeout("30s"), 30);
   assert.equal(parseTimeout("1m"), 60);
   assert.equal(parseTimeout("1h"), 3600);
@@ -19,6 +19,7 @@ test("parseTimeout maps presets and integers", () => {
 });
 
 test("parseTimeout rejects invalid values", () => {
+  assert.throws(() => parseTimeout("none"), /timeout/);
   assert.throws(() => parseTimeout("soon"), /timeout/);
   assert.throws(() => parseTimeout(-5), /non-negative/);
   assert.throws(() => parseTimeout(1.5), /non-negative/);

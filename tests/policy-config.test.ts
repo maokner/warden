@@ -96,6 +96,14 @@ tools:
 `),
     /positive integer/,
   );
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+approval:
+  timeout: none
+`),
+    /approval timeout/,
+  );
 });
 
 test("parsePolicyConfig rejects unsupported upstream transports", () => {

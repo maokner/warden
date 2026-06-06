@@ -35,36 +35,58 @@ pnpm run build
 
 The examples below call `warden`. From a local clone that's `node dist/src/cli/index.js` — run `npm link` to put `warden` on your `PATH`.
 
-## Use it
+## OpenAI Agents SDK in 5 minutes
 
-Warden offers a few ways to put a boundary in front of your tools. Pick whichever fits your stack.
+If you already have an `@openai/agents` app, Warden's fastest path is:
 
-### 1. Around your OpenAI Agents SDK tools
+```bash
+npm install warden
+warden login --token <telegram-bot-token>
+warden init --template openai
+```
 
-`guardTools` wraps your tool definitions so every call is classified, policy-checked, audited, and (if required) approved — one line, no other changes. A blocked call comes back to the model as a readable message instead of running.
+Create the Telegram bot with BotFather once. `warden login` prints a `t.me` link; tap Start from the phone that should approve risky agent actions.
+
+Then wrap the tool definitions you already pass to the OpenAI Agents SDK:
 
 ```ts
-import { tool } from "@openai/agents";
+import { Agent, run, tool } from "@openai/agents";
+import { z } from "zod";
 import { configureWarden } from "warden";
 import { guardTools } from "warden/openai";
 
-configureWarden(); // secure defaults; loads warden.yaml if present
+configureWarden(); // loads warden.yaml and Telegram credentials
 
-const tools = guardTools([
+const rawTools = [
   {
     name: "issue_refund",
     description: "Refund a payment",
-    parameters: refundSchema,
+    parameters: z.object({
+      paymentId: z.string(),
+      amount: z.number(),
+      reason: z.string(),
+    }),
     execute: async ({ paymentId, amount }) => stripe.refunds.create({ paymentId, amount }),
   },
-]).map(tool);
+];
+
+const tools = guardTools(rawTools).map(tool);
 
 const agent = new Agent({ name: "support", tools });
+
+const result = await run(agent, "Refund payment pi_123 for 25 dollars.");
+console.log(result.finalOutput);
 ```
 
-Wrap the whole array, not one tool at a time — that's how coverage stays complete.
+Risky calls pause and DM the Telegram approver. Reads can run. Credential and financial-looking actions are denied by default. Every decision lands in `.warden/audit.jsonl`.
 
-### 2. Any function, anywhere
+Wrap the whole array, not one tool at a time. That is how coverage stays complete as tools are added.
+
+## Other integration paths
+
+Warden also works outside the OpenAI Agents SDK.
+
+### Any function, anywhere
 
 `guard` wraps a single function and returns one with the same signature; it throws if the call is blocked.
 
@@ -80,7 +102,7 @@ const runSql = guard("database.run_sql", (args) => db.query(String(args.sql)), {
 await runSql({ sql: "drop table users" }); // throws: destructive SQL is denied before db.query runs
 ```
 
-### 3. As an MCP gateway
+### As an MCP gateway
 
 Add upstream MCP servers to `warden.yaml`, then run Warden as a single MCP server your agent connects to. Warden namespaces and policies every upstream tool, and prompts for risky calls on the terminal.
 
@@ -94,7 +116,7 @@ Generate the client config snippet:
 warden setup claude --config warden.yaml   # or: warden setup codex
 ```
 
-### 4. As a local HTTP sidecar
+### As a local HTTP sidecar
 
 For non-TypeScript or non-MCP stacks, ask Warden for a decision over localhost:
 
@@ -110,7 +132,7 @@ The response includes the decision, risk classification, an audit event, and `fo
 
 ## Configuration
 
-A policy is a `warden.yaml` file. Generate a starter with `warden init`.
+A policy is a `warden.yaml` file. Generate a starter with `warden init --template openai`.
 
 ```yaml
 defaults:            # decision per risk label
@@ -130,8 +152,8 @@ redaction:           # fields scrubbed from audit logs
   fields: [password, token, api_key, secret]
 
 approval:            # how approval-required actions are handled
-  method: local      # deny | local | callback
-  timeout: 1m        # none | 30s | 1m | 5m | 30m | 1h
+  method: telegram   # deny | local | callback | telegram
+  timeout: 5m        # 0s | 30s | 1m | 5m | 30m | 1h
 
 audit:
   path: .warden/audit.jsonl
@@ -164,8 +186,8 @@ Long timeouts assume a background/async agent — a synchronous chat request usu
 ## CLI
 
 ```
-warden init [--path warden.yaml] [--template default|database]
-            [--approval-method deny|local|callback] [--approval-timeout 1m]
+warden init [--path warden.yaml] [--template default|openai|database]
+            [--approval-method deny|local|callback|telegram] [--approval-timeout 5m]
 warden policy test <call.json> [--config warden.yaml] [--json]
 warden inspect --config warden.yaml          # list upstream tools + their decisions
 warden proxy --config warden.yaml            # run the MCP gateway
@@ -181,6 +203,7 @@ warden exec --config warden.yaml -- <cmd>    # launch a process with credentials
 Try it against the included examples:
 
 ```bash
+warden init --template openai
 warden policy test examples/calls/stripe-refund.json --config examples/policies/warden.yaml
 ```
 

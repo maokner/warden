@@ -8,7 +8,7 @@ The workflow must be fast enough for developers to tolerate, strict enough to pr
 
 ## What's implemented today
 
-An approval-required call stalls for `approval.timeout` (`none`/`30s`/`1m`/`5m`/`30m`/`1h`, default `1m`), then fails closed. The response channel is `approval.method`:
+An approval-required call stalls for `approval.timeout` (`0s`/`30s`/`1m`/`5m`/`30m`/`1h`, default `1m`), then fails closed. Use `0s` only when you intentionally want immediate fail-closed behavior. The response channel is `approval.method`:
 
 - **`deny`** — never approves; refuse with a clear message. Zero setup, fully fail-closed.
 - **`local`** — an in-process localhost inbox (web page + JSON API) backed by a pending-approval queue. Resolve from the browser or via `warden approvals` / `warden approve <id>` / `warden deny <id>`. The inbox only ever exposes redacted arguments.
@@ -16,6 +16,8 @@ An approval-required call stalls for `approval.timeout` (`none`/`30s`/`1m`/`5m`/
 - **`callback`** — a function you supply via `configureWarden({ approval: { onApproval } })`, so you can route to your own UI, Slack, or on-call.
 
 `warden proxy` (the MCP gateway) keeps its interactive `/dev/tty` terminal prompt; `approval.method` governs the SDK/`configureWarden` paths. The queue is the core primitive, so notification channels and suspend/resume can be added later without changing policy semantics.
+
+Tool-specific `approval.approvers` and `approval.require_reason` are enforced after a reviewer responds. Telegram poll approvals cannot provide a reason, so policies with `require_reason: true` need a local or callback approval channel.
 
 The rest of this document is the design rationale behind that behavior.
 
@@ -317,4 +319,3 @@ After terminal approval works, add:
 - team dashboard
 
 The terminal flow should remain available because it is the most trustworthy local fallback.
-

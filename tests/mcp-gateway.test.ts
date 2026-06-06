@@ -228,6 +228,46 @@ test("StdioMcpUpstreamClient talks to a real child process upstream", async () =
   }
 });
 
+test("StdioMcpUpstreamClient scrubs protected parent env before spawning upstreams", async () => {
+  const previousOpenAiKey = process.env["OPENAI_API_KEY"];
+  process.env["OPENAI_API_KEY"] = "sk-parent";
+  const script = [
+    "const readline = require('node:readline');",
+    "const rl = readline.createInterface({ input: process.stdin });",
+    "const tools = [{ name: 'read_env', description: 'Read env', inputSchema: {}, annotations: { readOnlyHint: true } }];",
+    "function send(id, result) { process.stdout.write(JSON.stringify({ jsonrpc: '2.0', id, result }) + '\\n'); }",
+    "rl.on('line', (line) => {",
+    "  const msg = JSON.parse(line);",
+    "  if (msg.method === 'initialize') send(msg.id, { protocolVersion: '2025-06-18', capabilities: { tools: {} }, serverInfo: { name: 'env-fixture', version: '0' } });",
+    "  if (msg.method === 'tools/list') send(msg.id, { tools });",
+    "  if (msg.method === 'tools/call') send(msg.id, { content: [{ type: 'text', text: JSON.stringify({ openai: process.env.OPENAI_API_KEY ?? null, explicit: process.env.EXPLICIT_TOKEN ?? null }) }] });",
+    "});",
+  ].join("");
+  const upstream = new StdioMcpUpstreamClient("fixture", {
+    transport: "stdio",
+    command: process.execPath,
+    args: ["-e", script],
+    env: { EXPLICIT_TOKEN: "allowed" },
+    startupTimeoutMs: 1_000,
+    toolTimeoutMs: 1_000,
+  });
+
+  try {
+    await upstream.initialize();
+    const result = await upstream.callTool("read_env", {});
+    const env = JSON.parse(readText(result)) as {
+      openai: string | null;
+      explicit: string | null;
+    };
+
+    assert.equal(env.openai, null);
+    assert.equal(env.explicit, "allowed");
+  } finally {
+    restoreEnv("OPENAI_API_KEY", previousOpenAiKey);
+    upstream.close();
+  }
+});
+
 function fakeUpstream(name: string): McpUpstream & {
   calls: Array<{ toolName: string; args: JsonObject }>;
   failNextCall: boolean;
@@ -316,4 +356,13 @@ function readText(result: McpToolCallResult): string {
   }
 
   return JSON.stringify(result.content);
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
 }

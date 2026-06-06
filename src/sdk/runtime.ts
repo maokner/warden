@@ -198,7 +198,7 @@ function resolveTelegramChannel(options: ConfigureWardenOptions): ApprovalChanne
 
   if (!token || chatId === undefined) {
     process.stderr.write(
-      "Warden: approval method is `telegram` but no bot token / chat id is configured (run `warden login`); failing closed (deny).\n",
+      "Warden: approval method is `telegram` but no bot token / chat id is configured. Run `warden login --token <bot-token>` or set WARDEN_TELEGRAM_TOKEN and WARDEN_TELEGRAM_CHAT_ID; failing closed (deny).\n",
     );
     return denyChannel();
   }

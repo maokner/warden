@@ -44,7 +44,65 @@ test("guardTool blocks denied actions without executing", async () => {
 
   const output = await guarded.execute({ sql: "drop table users" });
   assert.equal(called, false);
-  assert.match(String(output), /blocked by Warden policy/i);
+  assert.match(String(output), /Warden blocked this action/i);
+});
+
+test("guardTool classifies JSON-schema parameters", async () => {
+  const config = defaultPolicyConfig();
+  config.defaults.unknown = "allow";
+  let called = false;
+
+  const guarded = guardTool(
+    {
+      name: "lookup",
+      description: "Lookup a record",
+      parameters: {
+        type: "object",
+        properties: {
+          api_token: { type: "string" },
+        },
+      },
+      execute: async (_input: Record<string, unknown>) => {
+        called = true;
+        return "ok";
+      },
+    },
+    { config },
+  );
+
+  const output = await guarded.execute({});
+  assert.equal(called, false);
+  assert.match(String(output), /Warden blocked this action/i);
+});
+
+test("guardTool classifies Zod-like parameter shapes", async () => {
+  const config = defaultPolicyConfig();
+  config.defaults.unknown = "allow";
+  config.defaults.external_send = "deny";
+  let called = false;
+
+  const guarded = guardTool(
+    {
+      name: "lookup",
+      description: "Lookup a record",
+      parameters: {
+        shape: {
+          recipient: {
+            description: "External email address",
+          },
+        },
+      },
+      execute: async (_input: Record<string, unknown>) => {
+        called = true;
+        return "ok";
+      },
+    },
+    { config },
+  );
+
+  const output = await guarded.execute({});
+  assert.equal(called, false);
+  assert.match(String(output), /Warden blocked this action/i);
 });
 
 test("guardTool namespaces bare tool names under openai", async () => {

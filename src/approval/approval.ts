@@ -56,8 +56,7 @@ export function createApprovalRequest(
   const now = input.now ?? new Date();
   const expiresAt = new Date(now.getTime() + timeoutSeconds * 1000);
   const redacted = redactArguments(input.call.arguments, input.redactionFields);
-
-  return {
+  const request: ApprovalRequest = {
     id: `appr_${safeId()}`,
     runId: input.call.runId ?? "run_unknown",
     callId: input.call.callId ?? `call_${safeId()}`,
@@ -70,6 +69,12 @@ export function createApprovalRequest(
     displayArguments: redacted.value,
     status: "pending",
   };
+
+  if (input.decision.approval) {
+    request.approval = structuredClone(input.decision.approval);
+  }
+
+  return request;
 }
 
 export async function resolveApproval(
@@ -91,12 +96,16 @@ export async function resolveApproval(
   }
 
   if (!action.approver.trim()) {
-    return {
-      status: "failed",
+    return failed(
+      request,
       decidedAt,
-      originalArguments: structuredClone(request.originalArguments),
-      reason: "Approval reviewer did not provide an approver identity.",
-    };
+      "Approval reviewer did not provide an approver identity.",
+    );
+  }
+
+  const policyFailure = validateApprovalPolicy(request, action);
+  if (policyFailure) {
+    return failed(request, decidedAt, policyFailure);
   }
 
   switch (action.action) {
@@ -124,6 +133,59 @@ export async function resolveApproval(
         finalArguments: structuredClone(action.editedArguments),
       }, action.reason);
   }
+}
+
+function validateApprovalPolicy(
+  request: ApprovalRequest,
+  action: ApprovalAction,
+): string | undefined {
+  const approval = request.approval;
+  if (!approval) {
+    return undefined;
+  }
+
+  if (
+    approval.requireReason === true &&
+    action.action !== "reject" &&
+    (!action.reason || !action.reason.trim())
+  ) {
+    return "This approval policy requires a reason before the action can execute.";
+  }
+
+  if (
+    approval.approvers &&
+    approval.approvers.length > 0 &&
+    !approverMatches(action.approver, approval.approvers)
+  ) {
+    return `Approver ${action.approver} is not allowed by this approval policy.`;
+  }
+
+  return undefined;
+}
+
+function approverMatches(actual: string, allowedApprovers: string[]): boolean {
+  const trimmedActual = actual.trim();
+  const actualAliases = new Set([trimmedActual]);
+  const telegramPrefix = "telegram:";
+
+  if (trimmedActual.startsWith(telegramPrefix)) {
+    actualAliases.add(trimmedActual.slice(telegramPrefix.length));
+  }
+
+  return allowedApprovers.some((allowed) => actualAliases.has(allowed.trim()));
+}
+
+function failed(
+  request: ApprovalRequest,
+  decidedAt: string,
+  reason: string,
+): ApprovalResolution {
+  return {
+    status: "failed",
+    decidedAt,
+    originalArguments: structuredClone(request.originalArguments),
+    reason,
+  };
 }
 
 function expire(request: ApprovalRequest, now: Date): ApprovalResolution {

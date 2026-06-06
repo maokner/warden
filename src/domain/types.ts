@@ -126,6 +126,7 @@ export interface ApprovalRequest {
   policyRule: string;
   originalArguments: JsonObject;
   displayArguments: JsonObject;
+  approval?: ApprovalPolicy;
   status:
     | "pending"
     | "approved"

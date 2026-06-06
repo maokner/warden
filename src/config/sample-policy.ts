@@ -31,10 +31,47 @@ redaction:
 
 # How approval-required actions are handled.
 #   method:  deny | local | callback | telegram
-#   timeout: none | 30s | 1m | 5m | 30m | 1h
+#   timeout: 0s | 30s | 1m | 5m | 30m | 1h
 approval:
   method: deny
   timeout: 1m
+
+audit:
+  path: .warden/audit.jsonl
+`;
+
+export const OPENAI_POLICY = `# OpenAI Agents SDK quickstart policy.
+# Pair Telegram once with:
+#   warden login --token <bot-token>
+defaults:
+  read: allow
+  write: require_approval
+  destructive: require_approval
+  external_send: require_approval
+  code_execution: require_approval
+  file_mutation: require_approval
+  network_egress: require_approval
+  credential_access: deny
+  financial: deny
+  sensitive_data: require_approval
+  unknown: require_approval
+
+redaction:
+  fields:
+    - password
+    - token
+    - api_key
+    - secret
+    - private_key
+    - authorization
+    - cookie
+    - stripe_secret_key
+    - openai_api_key
+
+# Risky OpenAI Agent tool calls will DM the linked Telegram approver.
+approval:
+  method: telegram
+  timeout: 5m
 
 audit:
   path: .warden/audit.jsonl
@@ -97,7 +134,7 @@ redaction:
 
 # How approval-required actions are handled.
 #   method:  deny | local | callback | telegram
-#   timeout: none | 30s | 1m | 5m | 30m | 1h
+#   timeout: 0s | 30s | 1m | 5m | 30m | 1h
 approval:
   method: local
   timeout: 5m
@@ -108,6 +145,7 @@ audit:
 
 export const POLICY_TEMPLATES = {
   default: SAMPLE_POLICY,
+  openai: OPENAI_POLICY,
   database: DATABASE_POLICY,
 } as const;
 

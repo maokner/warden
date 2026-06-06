@@ -58,6 +58,27 @@ test("CLI init can create the database policy template", async () => {
   }
 });
 
+test("CLI init can create the OpenAI Telegram quickstart policy template", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    const code = await runCli(
+      ["init", "--template", "openai"],
+      { cwd: dir, ...output.io },
+    );
+    const policy = readFileSync(join(dir, "warden.yaml"), "utf8");
+
+    assert.equal(code, 0);
+    assert.match(policy, /OpenAI Agents SDK quickstart policy/);
+    assert.match(policy, /method: telegram/);
+    assert.match(policy, /timeout: 5m/);
+    assert.match(output.stdout(), /openai template/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI policy test emits JSON decisions", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
   const output = createOutput();

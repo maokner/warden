@@ -169,6 +169,99 @@ test("resolveApproval fails when approver identity is missing", async () => {
   assert.match(resolution.reason ?? "", /approver identity/);
 });
 
+test("resolveApproval enforces allowed approvers", async () => {
+  const request = createApprovalRequest({
+    call: {
+      ref: makeToolRef("filesystem", "write_file"),
+      arguments: { path: "src/config.ts", content: "hello" },
+    },
+    decision: {
+      decision: "require_approval",
+      reason: "write -> require_approval",
+      rule: "tools.filesystem.write_file.approval",
+      riskLabels: ["write"],
+      approval: {
+        timeoutSeconds: 60,
+        approvers: ["alice"],
+      },
+    },
+    redactionFields: [],
+    now: new Date("2026-06-05T00:00:00.000Z"),
+  });
+  const reviewer: ApprovalReviewer = {
+    review: async () => ({ action: "approve", approver: "bob" }),
+  };
+
+  const resolution = await resolveApproval(request, reviewer, {
+    now: new Date("2026-06-05T00:00:01.000Z"),
+  });
+
+  assert.equal(resolution.status, "failed");
+  assert.match(resolution.reason ?? "", /not allowed/);
+  assert.equal("finalArguments" in resolution, false);
+});
+
+test("resolveApproval accepts bare Telegram usernames in approver policies", async () => {
+  const request = createApprovalRequest({
+    call: {
+      ref: makeToolRef("filesystem", "write_file"),
+      arguments: { path: "src/config.ts", content: "hello" },
+    },
+    decision: {
+      decision: "require_approval",
+      reason: "write -> require_approval",
+      rule: "tools.filesystem.write_file.approval",
+      riskLabels: ["write"],
+      approval: {
+        timeoutSeconds: 60,
+        approvers: ["alice"],
+      },
+    },
+    redactionFields: [],
+    now: new Date("2026-06-05T00:00:00.000Z"),
+  });
+  const reviewer: ApprovalReviewer = {
+    review: async () => ({ action: "approve", approver: "telegram:alice" }),
+  };
+
+  const resolution = await resolveApproval(request, reviewer, {
+    now: new Date("2026-06-05T00:00:01.000Z"),
+  });
+
+  assert.equal(resolution.status, "approved");
+});
+
+test("resolveApproval requires reasons for executing approvals when configured", async () => {
+  const request = createApprovalRequest({
+    call: {
+      ref: makeToolRef("filesystem", "write_file"),
+      arguments: { path: "src/config.ts", content: "hello" },
+    },
+    decision: {
+      decision: "require_approval",
+      reason: "write -> require_approval",
+      rule: "tools.filesystem.write_file.approval",
+      riskLabels: ["write"],
+      approval: {
+        timeoutSeconds: 60,
+        requireReason: true,
+      },
+    },
+    redactionFields: [],
+    now: new Date("2026-06-05T00:00:00.000Z"),
+  });
+  const reviewer: ApprovalReviewer = {
+    review: async () => ({ action: "approve", approver: "human" }),
+  };
+
+  const resolution = await resolveApproval(request, reviewer, {
+    now: new Date("2026-06-05T00:00:01.000Z"),
+  });
+
+  assert.equal(resolution.status, "failed");
+  assert.match(resolution.reason ?? "", /requires a reason/);
+});
+
 function sampleRequest() {
   return createApprovalRequest({
     call: {
