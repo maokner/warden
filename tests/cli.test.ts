@@ -29,6 +29,27 @@ test("CLI init creates a policy and refuses accidental overwrite", async () => {
   }
 });
 
+test("CLI init can create the database policy template", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    const code = await runCli(
+      ["init", "--template", "database"],
+      { cwd: dir, ...output.io },
+    );
+    const policy = readFileSync(join(dir, "warden.yaml"), "utf8");
+
+    assert.equal(code, 0);
+    assert.match(policy, /Database-focused Warden policy/);
+    assert.match(policy, /destructive: deny/);
+    assert.match(policy, /postgres\.query/);
+    assert.match(output.stdout(), /database template/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI policy test emits JSON decisions", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
   const output = createOutput();
@@ -292,6 +313,60 @@ test("CLI proxy reports missing explicit config through runCli", async () => {
   }
 });
 
+test("CLI exec launches with protected env scrubbed and Warden-only temp config", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+  const previousOpenAiKey = process.env["OPENAI_API_KEY"];
+  const previousDatabaseUrl = process.env["DATABASE_URL"];
+
+  try {
+    process.env["OPENAI_API_KEY"] = "sk-test";
+    process.env["DATABASE_URL"] = "postgres://user:pass@example/db";
+    writeFileSync(join(dir, "warden.yaml"), "defaults: {}\n");
+
+    const script = [
+      "const fs = require('node:fs');",
+      "const configPath = process.env.CODEX_HOME + '/config.toml';",
+      "console.log(JSON.stringify({",
+      "openai: process.env.OPENAI_API_KEY ?? null,",
+      "database: process.env.DATABASE_URL ?? null,",
+      "home: process.env.HOME,",
+      "codexHome: process.env.CODEX_HOME,",
+      "wardenExec: process.env.WARDEN_EXEC,",
+      "config: fs.readFileSync(configPath, 'utf8')",
+      "}));",
+    ].join("");
+
+    const code = await runCli(
+      ["exec", "--config", "warden.yaml", "--", process.execPath, "-e", script],
+      { cwd: dir, ...output.io },
+    );
+    const result = JSON.parse(output.stdout()) as {
+      openai: string | null;
+      database: string | null;
+      home: string;
+      codexHome: string;
+      wardenExec: string;
+      config: string;
+    };
+
+    assert.equal(code, 0);
+    assert.equal(result.openai, null);
+    assert.equal(result.database, null);
+    assert.match(result.home, /warden-exec-/);
+    assert.match(result.codexHome, /warden-exec-/);
+    assert.equal(result.wardenExec, "1");
+    assert.match(result.config, /\[mcp_servers\.warden\]/);
+    assert.match(result.config, /"proxy"/);
+    assert.match(result.config, /warden\.yaml/);
+    assert.match(output.stderr(), /scrubbed HOME=/);
+  } finally {
+    restoreEnv("OPENAI_API_KEY", previousOpenAiKey);
+    restoreEnv("DATABASE_URL", previousDatabaseUrl);
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 function writeFakeUpstreamConfig(dir: string): void {
   const fakeUpstreamPath = join(
     process.cwd(),
@@ -323,6 +398,15 @@ upstreams:
     tool_timeout_ms: 1000
 `,
   );
+}
+
+function restoreEnv(key: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[key];
+    return;
+  }
+
+  process.env[key] = value;
 }
 
 function createOutput(): {

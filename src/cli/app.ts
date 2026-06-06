@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import {
   closeSync,
   createReadStream,
@@ -9,6 +10,7 @@ import {
 } from "node:fs";
 import { resolve } from "node:path";
 import type { Readable, Writable } from "node:stream";
+import type { AddressInfo } from "node:net";
 import type { ApprovalReviewer } from "../approval/approval.js";
 import { createTerminalReviewer } from "../approval/terminal.js";
 import type {
@@ -30,7 +32,12 @@ import {
   readAuditEvents,
   runDoctor,
 } from "../index.js";
-import { SAMPLE_POLICY } from "../config/sample-policy.js";
+import {
+  policyTemplate,
+  policyTemplateNames,
+} from "../config/sample-policy.js";
+import { createScrubbedExecEnvironment } from "../exec/environment.js";
+import { createHttpDecisionServer } from "../http/sidecar.js";
 import { McpGateway } from "../mcp/gateway.js";
 import { LineJsonRpcPeer } from "../mcp/line-json-rpc.js";
 import { createStdioUpstreams } from "../mcp/upstream.js";
@@ -62,8 +69,12 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         return await runInspect(rest, io);
       case "setup":
         return runSetup(rest, io);
+      case "serve":
+        return await runServe(rest, io);
       case "proxy":
         return await runProxy(rest, io);
+      case "exec":
+        return await runExec(rest, io);
       case "help":
       case "--help":
       case "-h":
@@ -83,6 +94,7 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 function runInit(args: string[], io: CliIo): number {
   const options = parseOptions(args);
   const outputPath = resolve(io.cwd, options.value("--path") ?? "warden.yaml");
+  const templateName = options.value("--template") ?? "default";
   const force = options.has("--force");
 
   if (existsSync(outputPath) && !force) {
@@ -92,8 +104,8 @@ function runInit(args: string[], io: CliIo): number {
     return 1;
   }
 
-  writeFileSync(outputPath, SAMPLE_POLICY);
-  io.stdout(`Created ${outputPath}\n`);
+  writeFileSync(outputPath, policyTemplate(templateName));
+  io.stdout(`Created ${outputPath} from ${templateName} template\n`);
   return 0;
 }
 
@@ -194,7 +206,31 @@ function runAudit(args: string[], io: CliIo): number {
 
 function runDoctorCommand(args: string[], io: CliIo): number {
   const options = parseOptions(args);
-  const report = runDoctor(io.cwd, { env: process.env });
+  const configPath = resolve(io.cwd, options.value("--config") ?? "warden.yaml");
+  let auditPath: string | undefined;
+  let policyPath: string | undefined;
+
+  if (existsSync(configPath)) {
+    const config = loadPolicyConfig(configPath);
+    policyPath = configPath;
+    auditPath = resolve(io.cwd, config.auditPath);
+  } else if (options.has("--config")) {
+    throw new Error(`Policy config not found: ${configPath}`);
+  }
+
+  const doctorOptions = {
+    env: process.env,
+  };
+  if (process.env["HOME"]) {
+    Object.assign(doctorOptions, { homeDir: process.env["HOME"] });
+  }
+  if (policyPath) {
+    Object.assign(doctorOptions, { policyPath });
+  }
+  if (auditPath) {
+    Object.assign(doctorOptions, { auditPath });
+  }
+  const report = runDoctor(io.cwd, doctorOptions);
 
   if (options.has("--json")) {
     io.stdout(`${JSON.stringify(report, null, 2)}\n`);
@@ -207,6 +243,36 @@ function runDoctorCommand(args: string[], io: CliIo): number {
   }
 
   return report.status === "monitoring_only" ? 2 : 0;
+}
+
+async function runExec(args: string[], io: CliIo): Promise<number> {
+  const parsed = parseExecArgs(args);
+  if (parsed.command.length === 0) {
+    io.stderr("Usage: warden exec [--config warden.yaml] -- <command> [args...]\n");
+    return 1;
+  }
+
+  const configPath = resolve(io.cwd, parsed.configPath);
+  if (!existsSync(configPath)) {
+    io.stderr(`Policy config not found: ${configPath}\n`);
+    return 1;
+  }
+
+  const sandbox = createScrubbedExecEnvironment({
+    cwd: io.cwd,
+    configPath,
+    env: process.env,
+  });
+
+  io.stderr(
+    `Warden exec launching with scrubbed HOME=${sandbox.homeDir} and CODEX_HOME=${sandbox.codexHome}\n`,
+  );
+
+  try {
+    return await spawnExecCommand(parsed.command, io, sandbox.env);
+  } finally {
+    sandbox.cleanup();
+  }
 }
 
 function runSetup(args: string[], io: CliIo): number {
@@ -398,6 +464,46 @@ async function runProxy(args: string[], io: CliIo): Promise<number> {
   });
 }
 
+async function runServe(args: string[], io: CliIo): Promise<number> {
+  const options = parseOptions(args);
+  const configPath = options.value("--config") ?? "warden.yaml";
+  const config = loadConfig(resolve(io.cwd, configPath), options.has("--config"));
+  const host = options.value("--host") ?? "127.0.0.1";
+  const port = parsePort(options.value("--port") ?? "8787");
+  const server = createHttpDecisionServer({
+    config,
+    auditPath: resolve(io.cwd, config.auditPath),
+  });
+
+  return new Promise<number>((resolveExitCode, reject) => {
+    let listening = false;
+
+    server.once("error", (error) => {
+      if (!listening) {
+        reject(error);
+      } else {
+        io.stderr(`${error instanceof Error ? error.message : String(error)}\n`);
+      }
+    });
+
+    server.once("close", () => {
+      resolveExitCode(0);
+    });
+
+    server.listen(port, host, () => {
+      listening = true;
+      const address = server.address();
+      const actualPort =
+        typeof address === "object" && address !== null
+          ? (address as AddressInfo).port
+          : port;
+      io.stderr(
+        `Warden HTTP sidecar listening on http://${host}:${actualPort}\n`,
+      );
+    });
+  });
+}
+
 function createApprovalSideChannel(options: {
   input?: Readable;
   output?: Writable;
@@ -538,17 +644,98 @@ function parseOptions(args: string[]): {
   };
 }
 
+function parseExecArgs(args: string[]): {
+  configPath: string;
+  command: string[];
+} {
+  let configPath = "warden.yaml";
+  const command: string[] = [];
+
+  for (let index = 0; index < args.length; index += 1) {
+    const arg = args[index];
+    if (!arg) {
+      continue;
+    }
+
+    if (arg === "--") {
+      command.push(...args.slice(index + 1));
+      break;
+    }
+
+    if (arg === "--config") {
+      const value = args[index + 1];
+      if (!value || value.startsWith("--")) {
+        throw new Error("--config requires a path.");
+      }
+      configPath = value;
+      index += 1;
+      continue;
+    }
+
+    if (arg.startsWith("--")) {
+      throw new Error(`Unknown warden exec option: ${arg}`);
+    }
+
+    command.push(...args.slice(index));
+    break;
+  }
+
+  return { configPath, command };
+}
+
+function spawnExecCommand(
+  command: string[],
+  io: CliIo,
+  env: Record<string, string>,
+): Promise<number> {
+  return new Promise((resolveExitCode, reject) => {
+    const child = spawn(command[0] as string, command.slice(1), {
+      cwd: io.cwd,
+      env,
+      stdio: ["inherit", "pipe", "pipe"],
+    });
+
+    child.stdout.on("data", (chunk) => {
+      io.stdout(String(chunk));
+    });
+    child.stderr.on("data", (chunk) => {
+      io.stderr(String(chunk));
+    });
+    child.once("error", reject);
+    child.once("exit", (code, signal) => {
+      if (typeof code === "number") {
+        resolveExitCode(code);
+        return;
+      }
+
+      io.stderr(`Command exited from signal ${signal ?? "unknown"}\n`);
+      resolveExitCode(1);
+    });
+  });
+}
+
+function parsePort(value: string): number {
+  const port = Number(value);
+  if (!Number.isInteger(port) || port < 0 || port > 65_535) {
+    throw new Error("--port must be an integer between 0 and 65535.");
+  }
+
+  return port;
+}
+
 function helpText(): string {
   return `Warden
 
 Commands:
-  warden init [--path warden.yaml] [--force]
+  warden init [--path warden.yaml] [--template ${policyTemplateNames().join("|")}] [--force]
   warden policy test <call.json> [--config warden.yaml] [--json] [--audit]
   warden audit tail [--path .warden/audit.jsonl] [--limit 20] [--json]
-  warden doctor [--json]
+  warden doctor [--config warden.yaml] [--json]
   warden inspect --config warden.yaml [--json]
   warden setup codex|claude [--config /path/to/warden.yaml]
+  warden serve [--config warden.yaml] [--host 127.0.0.1] [--port 8787]
   warden proxy --config warden.yaml [--approver local_user]
+  warden exec [--config warden.yaml] -- <command> [args...]
 `;
 }
 

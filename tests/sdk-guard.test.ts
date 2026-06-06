@@ -16,10 +16,10 @@ test("guardAction allows read-only SQL and executes the database function", asyn
     config,
     tool: "database.run_sql",
     description: "Run SQL against the application database",
-    arguments: { sql: "select id, email from users limit 1" },
+    arguments: { sql: "select id, enabled from feature_flags limit 1" },
     execute: async (args) => {
       executedSql = String(args["sql"]);
-      return { rows: [{ id: 1, email: "user@example.com" }] };
+      return { rows: [{ id: 1, enabled: true }] };
     },
     client: "website_chatbot",
     agent: "support_agent",
@@ -28,9 +28,9 @@ test("guardAction allows read-only SQL and executes the database function", asyn
 
   assert.equal(result.executed, true);
   assert.equal(result.decision.decision, "allow");
-  assert.equal(executedSql, "select id, email from users limit 1");
+  assert.equal(executedSql, "select id, enabled from feature_flags limit 1");
   assert.deepEqual(result.output, {
-    rows: [{ id: 1, email: "user@example.com" }],
+    rows: [{ id: 1, enabled: true }],
   });
   assert.equal(result.auditEvent.client, "website_chatbot");
   assert.equal(result.auditEvent.agent, "support_agent");
@@ -77,7 +77,11 @@ test("guardAction hard-denies destructive database SQL before execution", async 
   assert.equal(result.executed, false);
   assert.equal(executed, false);
   assert.equal(result.decision.decision, "deny");
-  assert.deepEqual(result.classification.labels, ["write", "destructive"]);
+  assert.deepEqual(result.classification.labels, [
+    "write",
+    "destructive",
+    "sensitive_data",
+  ]);
   assert.match(result.error ?? "", /denied by policy/);
 });
 

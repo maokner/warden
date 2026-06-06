@@ -21,6 +21,7 @@ The current codebase includes the local product core:
 - client compatibility smoke check for Codex and Claude Code MCP registration
 - basic `warden doctor`
 - Codex and Claude Code setup snippet generation
+- localhost HTTP decision sidecar for non-TypeScript and non-MCP integrations
 - example policies and tool-call fixtures
 
 ## Recent Hardening
@@ -34,6 +35,10 @@ The review pass fixed several important issues:
 - `warden doctor` now flags protected credential environment variables.
 - `guardAction` can protect arbitrary backend functions without MCP.
 - `warden proxy` now serves a minimal MCP stdio gateway.
+- Key-value redaction now handles values containing `s` and is idempotent for existing `[REDACTED]` markers.
+- `redact_then_allow` now forwards redacted arguments instead of original arguments.
+- `transform_then_allow` now fails closed until concrete transform rules are implemented.
+- `warden serve` now exposes `POST /v1/decide` for local HTTP decision-only integrations.
 
 ## Current Commands
 
@@ -50,6 +55,7 @@ node dist/src/cli/index.js doctor --json
 node dist/src/cli/index.js inspect --config warden.yaml
 node dist/src/cli/index.js setup codex --config examples/policies/warden.yaml
 node dist/src/cli/index.js setup claude --config examples/policies/warden.yaml
+node dist/src/cli/index.js serve --config examples/policies/warden.yaml --port 8787
 node dist/src/cli/index.js proxy --config warden.yaml
 ```
 
@@ -68,6 +74,8 @@ node dist/src/cli/index.js proxy --config warden.yaml
 - Edited approval arguments are rechecked before execution.
 - Audit logs redact configured sensitive fields.
 - Audit logs redact common secret-looking substrings inside larger string values.
+- `redact_then_allow` forwards redacted arguments to protected executors and audit evidence.
+- `transform_then_allow` refuses execution until a transform implementation exists.
 - Suspicious tool metadata requires review.
 - URL and webhook argument values raise network/external-send risk.
 - SQL `SELECT` actions can execute through `guardAction`.
@@ -80,11 +88,12 @@ node dist/src/cli/index.js proxy --config warden.yaml
 - Codex CLI `0.137.0` can call the allowed fake read tool through `warden proxy` in an ephemeral model-driven session.
 - `warden proxy` can initialize, list namespaced upstream tools, route allowed calls, block policy-denied calls, and execute approval-required calls after terminal side-channel approval.
 - `warden proxy` still fails closed on approval-required calls when no terminal side channel is available.
+- `warden serve` accepts action metadata and arguments over localhost HTTP and returns allow, deny, or require-approval decisions with audit evidence.
 
 ## Not Built Yet
 
 - `warden exec`
-- localhost HTTP sidecar for non-TypeScript and non-MCP integrations
+- execute-through HTTP adapters for configured protected actions
 - database-specific policy templates and stronger SQL classification
 - containerized sandboxing
 - model-driven Claude Code tool-call smoke test
@@ -94,9 +103,9 @@ node dist/src/cli/index.js proxy --config warden.yaml
 
 ## Next Engineering Step
 
-Add a language-neutral Warden action boundary:
+Add database-focused protection on top of the new language-neutral action boundary:
 
-1. Expose a localhost HTTP decision API.
-2. Accept action metadata and arguments from any app or agent framework.
-3. Return allow, deny, or require-approval decisions with audit evidence.
-4. Add database-focused policy templates and stronger SQL checks.
+1. Add database-focused policy templates.
+2. Strengthen SQL classification beyond keyword heuristics.
+3. Add table/operation allowlists and environment labels.
+4. Add bypass scans for direct database credentials and SDK imports.

@@ -17,6 +17,7 @@ import type {
 } from "../domain/types.js";
 import { evaluatePolicy } from "../policy/engine.js";
 import { hashPolicyConfig } from "../policy/hash.js";
+import { redactArguments } from "../policy/redaction.js";
 
 export interface ToolExecutor {
   execute: (call: ToolCall) => Promise<ToolExecutionResult>;
@@ -181,6 +182,34 @@ export async function handleToolCall(
       approval,
       approvalId: approvalRequest.id,
       executionArgs,
+      start,
+    });
+  }
+
+  if (decision.decision === "transform_then_allow") {
+    return finalize({
+      input,
+      classification,
+      decision,
+      policyVersion,
+      executed: false,
+      responseStatus: "not_executed",
+      error:
+        "transform_then_allow is not implemented; refusing to execute original arguments.",
+      durationMs: Date.now() - start,
+    });
+  }
+
+  if (decision.decision === "redact_then_allow") {
+    return executeAndFinalize({
+      input,
+      classification,
+      decision,
+      policyVersion,
+      executionArgs: redactArguments(
+        input.call.arguments,
+        input.config.redaction.fields,
+      ).value,
       start,
     });
   }

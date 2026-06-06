@@ -32,3 +32,87 @@ redaction:
 audit:
   path: .warden/audit.jsonl
 `;
+
+export const DATABASE_POLICY = `# Database-focused Warden policy.
+# Keep the policy and audit path outside an agent-writable workspace for hardened use.
+defaults:
+  read: allow
+  write: require_approval
+  destructive: deny
+  external_send: deny
+  code_execution: deny
+  file_mutation: deny
+  network_egress: deny
+  credential_access: deny
+  financial: deny
+  sensitive_data: require_approval
+  unknown: require_approval
+
+tools:
+  # Replace or extend these names with exact tool names from "warden inspect".
+  postgres.query:
+    approval:
+      require_reason: true
+  postgres.execute:
+    approval:
+      require_reason: true
+  postgres.run_query:
+    approval:
+      require_reason: true
+  mysql.query:
+    approval:
+      require_reason: true
+  mysql.execute:
+    approval:
+      require_reason: true
+  sqlite.query:
+    approval:
+      require_reason: true
+  sqlite.execute:
+    approval:
+      require_reason: true
+
+redaction:
+  fields:
+    - password
+    - token
+    - api_key
+    - secret
+    - private_key
+    - authorization
+    - cookie
+    - database_url
+    - connection_string
+    - dsn
+    - pgpassword
+    - mysql_pwd
+    - uri
+
+audit:
+  path: .warden/audit.jsonl
+`;
+
+export const POLICY_TEMPLATES = {
+  default: SAMPLE_POLICY,
+  database: DATABASE_POLICY,
+} as const;
+
+export type PolicyTemplateName = keyof typeof POLICY_TEMPLATES;
+
+export function policyTemplateNames(): PolicyTemplateName[] {
+  return Object.keys(POLICY_TEMPLATES) as PolicyTemplateName[];
+}
+
+export function policyTemplate(name: string): string {
+  if (!isPolicyTemplateName(name)) {
+    throw new Error(
+      `Unknown policy template "${name}". Available templates: ${policyTemplateNames().join(", ")}.`,
+    );
+  }
+
+  return POLICY_TEMPLATES[name];
+}
+
+function isPolicyTemplateName(name: string): name is PolicyTemplateName {
+  return Object.hasOwn(POLICY_TEMPLATES, name);
+}

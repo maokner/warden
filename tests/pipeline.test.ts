@@ -208,6 +208,51 @@ test("handleToolCall records upstream errors as executed attempts", async () => 
   });
 });
 
+test("handleToolCall forwards redacted arguments for redact_then_allow", async () => {
+  const config = defaultPolicyConfig();
+  config.tools["api.read_payload"] = { decision: "redact_then_allow" };
+  config.redaction.fields.push("payload");
+  const executor = recordingExecutor();
+  const call = callFor("api.read_payload", "Read a payload", {
+    content: "password=secret&safe=true",
+    payload: "internal value",
+    keep: "visible",
+  });
+
+  const result = await handleToolCall({ config, call, executor });
+
+  assert.equal(result.executed, true);
+  assert.equal(result.decision.decision, "redact_then_allow");
+  assert.equal(executor.calls.length, 1);
+  assert.deepEqual(executor.calls[0]?.arguments, {
+    content: "password=[REDACTED]&safe=true",
+    payload: "[REDACTED]",
+    keep: "visible",
+  });
+  assert.deepEqual(result.auditEvent.executedArguments, {
+    content: "password=[REDACTED]&safe=true",
+    payload: "[REDACTED]",
+    keep: "visible",
+  });
+});
+
+test("handleToolCall refuses transform_then_allow until transforms are implemented", async () => {
+  const config = defaultPolicyConfig();
+  config.tools["api.read_payload"] = { decision: "transform_then_allow" };
+  const executor = recordingExecutor();
+  const call = callFor("api.read_payload", "Read a payload", {
+    limit: 1000,
+  });
+
+  const result = await handleToolCall({ config, call, executor });
+
+  assert.equal(result.executed, false);
+  assert.equal(result.decision.decision, "transform_then_allow");
+  assert.equal(executor.calls.length, 0);
+  assert.match(result.error ?? "", /not implemented/);
+  assert.equal(result.auditEvent.responseStatus, "not_executed");
+});
+
 function callFor(tool: string, description: string, args: Record<string, JsonValue>): ToolCall {
   const metadata = toolMetadata(tool, { description });
 

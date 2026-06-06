@@ -249,11 +249,13 @@ Success criteria:
 
 Goal: make Warden usable from any language or agent framework.
 
+Current state: decision-only HTTP support is built through `warden serve` and `POST /v1/decide`. Execute-through adapters remain future work.
+
 Deliverables:
 
-- localhost HTTP decision API
-- JSON request/response schema for action metadata and arguments
-- audit-writing decision-only mode
+- localhost HTTP decision API - built
+- JSON request/response schema for action metadata and arguments - built
+- audit-writing decision-only mode - built
 - optional execute-through mode for configured adapters
 - examples for database-backed chatbot integration
 

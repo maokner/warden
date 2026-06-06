@@ -12,6 +12,7 @@ import {
   type JsonRpcId,
   type JsonRpcMessage,
   type JsonRpcRequest,
+  type JsonRpcResponse,
 } from "./json-rpc.js";
 
 export type JsonRpcRequestHandler = (
@@ -137,11 +138,7 @@ export class LineJsonRpcPeer {
     await this.handleRequest(message);
   }
 
-  private handleResponse(message: JsonRpcMessage): void {
-    if (!isResponse(message)) {
-      return;
-    }
-
+  private handleResponse(message: JsonRpcResponse): void {
     const pending = this.pending.get(message.id);
     if (!pending) {
       this.emitError(new Error(`Received response for unknown id: ${String(message.id)}`));

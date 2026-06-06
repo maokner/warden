@@ -1,0 +1,57 @@
+# Database-focused Warden policy.
+# Keep this policy and the audit path outside an agent-writable workspace for hardened use.
+defaults:
+  read: allow
+  write: require_approval
+  destructive: deny
+  external_send: deny
+  code_execution: deny
+  file_mutation: deny
+  network_egress: deny
+  credential_access: deny
+  financial: deny
+  sensitive_data: require_approval
+  unknown: require_approval
+
+tools:
+  # Replace or extend these names with exact tool names from "warden inspect".
+  postgres.query:
+    approval:
+      require_reason: true
+  postgres.execute:
+    approval:
+      require_reason: true
+  postgres.run_query:
+    approval:
+      require_reason: true
+  mysql.query:
+    approval:
+      require_reason: true
+  mysql.execute:
+    approval:
+      require_reason: true
+  sqlite.query:
+    approval:
+      require_reason: true
+  sqlite.execute:
+    approval:
+      require_reason: true
+
+redaction:
+  fields:
+    - password
+    - token
+    - api_key
+    - secret
+    - private_key
+    - authorization
+    - cookie
+    - database_url
+    - connection_string
+    - dsn
+    - pgpassword
+    - mysql_pwd
+    - uri
+
+audit:
+  path: .warden/audit.jsonl

@@ -158,9 +158,9 @@ export function classifyToolCall(
     reasons.push("Tool metadata contains suspicious instruction-like text.");
   }
 
-  const sql = findSql(args);
-  if (sql) {
-    applySqlClassification(sql, labels, reasons);
+  const sqlStatements = collectSqlStatements(args);
+  if (sqlStatements.length > 0) {
+    applySqlClassification(sqlStatements, labels, reasons);
   }
 
   applyStringValueClassification(stringSignals, labels, reasons);
@@ -255,39 +255,172 @@ function collectStringSignals(value: JsonValue): string[] {
   return [];
 }
 
-function findSql(args: JsonObject): string | undefined {
-  for (const key of ["sql", "query", "statement"]) {
-    const value = args[key];
-    if (typeof value === "string" && value.trim()) {
-      return value.trim().toLowerCase();
-    }
+const SQL_START_PATTERN =
+  /^\s*(?:select|with|show|describe|desc|explain|values|insert|update|upsert|delete|drop|truncate|alter|create|replace|merge|grant|revoke|copy|load|call|do|vacuum|analyze|reindex|begin|commit|rollback)\b/i;
+
+function collectSqlStatements(value: JsonValue): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((entry) => collectSqlStatements(entry));
   }
 
-  return undefined;
+  if (value && typeof value === "object") {
+    return Object.values(value).flatMap((nested) => collectSqlStatements(nested));
+  }
+
+  if (typeof value !== "string") {
+    return [];
+  }
+
+  const trimmed = value.trim();
+  if (!trimmed || !SQL_START_PATTERN.test(trimmed)) {
+    return [];
+  }
+
+  return [trimmed];
 }
 
 function applySqlClassification(
-  sql: string,
+  sqlStatements: string[],
   labels: Set<RiskLabel>,
   reasons: string[],
 ): void {
-  const normalized = sql.replace(/\s+/g, " ");
+  const normalizedStatements = sqlStatements
+    .map((sql) => normalizeSqlForMatching(sql))
+    .filter((sql) => sql.length > 0);
 
-  if (/^(select|show|describe|explain|with)\b/.test(normalized)) {
+  if (normalizedStatements.length === 0) {
+    return;
+  }
+
+  const combined = normalizedStatements.join("; ");
+  const statementParts = combined
+    .split(";")
+    .map((statement) => statement.trim())
+    .filter(Boolean);
+
+  const hasDestructiveSql =
+    /\b(drop|delete|truncate)\b/.test(combined) ||
+    /\balter\s+(table|database|schema|view|materialized\s+view|index|sequence|type)\b/.test(
+      combined,
+    ) ||
+    /\brevoke\b/.test(combined);
+
+  const hasWriteSql =
+    hasDestructiveSql ||
+    /\b(insert|update|upsert|create|replace|merge|grant|vacuum|reindex)\b/.test(
+      combined,
+    ) ||
+    /\bselect\b[\s\S]*\bfor\s+update\b/.test(combined) ||
+    /\bcopy\b[\s\S]*\bfrom\b/.test(combined) ||
+    /\bload\s+data\b/.test(combined);
+
+  const hasPrivilegeSql =
+    /\b(create|alter|drop)\s+(user|role|login)\b/.test(combined) ||
+    /\b(grant|revoke)\b/.test(combined) ||
+    /\b(pg_authid|mysql\.user|user_privileges|password|credential|api_?key|secret|private_?key)\b/.test(
+      combined,
+    );
+
+  const hasSensitiveSql =
+    hasPrivilegeSql ||
+    /\b(users?|customers?|accounts?|patients?|employees?|payments?|invoices?|orders?|sessions?|tokens?|oauth|auth|ssn|social_security|email|phone|address|dob|birth|medical|health|card|credit_?card|billing|secrets?)\b/.test(
+      combined,
+    ) ||
+    /\b(copy|unload)\b[\s\S]*\bto\b/.test(combined);
+
+  const hasFileSql =
+    /\b(pg_read_file|pg_ls_dir|lo_import|lo_export|load_file)\b/.test(
+      combined,
+    ) ||
+    /\binto\s+(out|dump)?file\b/.test(combined) ||
+    /\bcopy\b[\s\S]*\bto\b/.test(combined);
+
+  const hasNetworkSql =
+    /\b(dblink|postgres_fdw|mysql_fdw|http_get|http_post|http_request|net\.http|aws_s3|s3_export|gcs|azure)\b/.test(
+      combined,
+    ) || /\b(unload|copy)\b[\s\S]*\bto\b[\s\S]*\b(s3|gs|azure|http)\b/.test(combined);
+
+  const hasExternalSendSql = /\b(copy|unload)\b[\s\S]*\bto\b/.test(combined);
+
+  const hasCodeExecutionSql =
+    /\bcopy\b[\s\S]*\bprogram\b/.test(combined) ||
+    /\b(create\s+extension|load_extension|xp_cmdshell)\b/.test(combined) ||
+    /\blanguage\s+(plpython|plperlu|c)\b/.test(combined) ||
+    /^\s*do\b/.test(combined);
+
+  const hasReadOnlySql =
+    statementParts.length > 0 &&
+    statementParts.every((statement) =>
+      /^(select|show|describe|desc|explain|values|with)\b/.test(statement),
+    );
+
+  if (
+    hasReadOnlySql &&
+    !hasWriteSql &&
+    !hasDestructiveSql &&
+    !hasCodeExecutionSql &&
+    !hasFileSql &&
+    !hasNetworkSql
+  ) {
     labels.add("read");
     reasons.push("SQL appears read-only.");
   }
 
-  if (/\b(drop|delete|truncate|alter)\b/.test(normalized)) {
+  if (hasDestructiveSql) {
     labels.add("destructive");
     labels.add("write");
     reasons.push("SQL contains destructive mutation keyword.");
   }
 
-  if (/\b(insert|update|create|replace|merge)\b/.test(normalized)) {
+  if (hasWriteSql && !hasDestructiveSql) {
     labels.add("write");
     reasons.push("SQL contains mutation keyword.");
   }
+
+  if (hasSensitiveSql) {
+    labels.add("sensitive_data");
+    reasons.push("SQL references sensitive-looking data or exports result data.");
+  }
+
+  if (hasPrivilegeSql) {
+    labels.add("credential_access");
+    reasons.push("SQL references credentials, roles, grants, or secrets.");
+  }
+
+  if (hasFileSql) {
+    labels.add("file_mutation");
+    reasons.push("SQL can read from or write to server-side files.");
+  }
+
+  if (hasNetworkSql) {
+    labels.add("network_egress");
+    reasons.push("SQL references network or cloud export functionality.");
+  }
+
+  if (hasExternalSendSql) {
+    labels.add("external_send");
+    reasons.push("SQL can export database result data outside the database.");
+  }
+
+  if (hasCodeExecutionSql) {
+    labels.add("code_execution");
+    reasons.push("SQL can execute database extensions, shell programs, or procedural code.");
+  }
+}
+
+function normalizeSqlForMatching(sql: string): string {
+  return stripSqlCommentsAndLiterals(sql)
+    .replace(/\s+/g, " ")
+    .trim()
+    .toLowerCase();
+}
+
+function stripSqlCommentsAndLiterals(sql: string): string {
+  return sql
+    .replace(/\/\*[\s\S]*?\*\//g, " ")
+    .replace(/--[^\r\n]*/g, " ")
+    .replace(/\$[A-Za-z_]*\$[\s\S]*?\$[A-Za-z_]*\$/g, " ? ")
+    .replace(/'(?:''|[^'])*'/g, " ? ");
 }
 
 function applyStringValueClassification(

@@ -15,7 +15,7 @@ const SECRET_TOKEN_PATTERNS: RegExp[] = [
   /\b[A-Za-z0-9._%+-]+:[A-Za-z0-9._%+-]{8,}@/g,
 ];
 const SECRET_KEY_VALUE_PATTERNS: RegExp[] = [
-  /\b(password|passwd|pwd|token|api[_-]?key|secret)=([^\\s&]+)\b/gi,
+  /\b(password|passwd|pwd|token|api[_-]?key|secret)=((?!\[REDACTED\])[^\s&]+)(?=&|\s|$)/gi,
 ];
 
 export function redactArguments(

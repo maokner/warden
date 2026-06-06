@@ -72,6 +72,17 @@ node dist/src/cli/index.js policy test examples/calls/stripe-refund.json --confi
 node dist/src/cli/index.js doctor --json
 ```
 
+Run the local HTTP decision sidecar for non-TypeScript and non-MCP integrations:
+
+```bash
+node dist/src/cli/index.js serve --config examples/policies/warden.yaml --port 8787
+curl -s http://127.0.0.1:8787/v1/decide \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"database.run_sql","description":"Run SQL against the app database","arguments":{"sql":"select id from users limit 1"}}'
+```
+
+The sidecar returns the policy decision, risk classification, audit event, and `forwardArguments` when the app may execute the action itself.
+
 Use Warden inside an app backend:
 
 ```ts

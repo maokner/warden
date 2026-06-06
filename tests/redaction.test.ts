@@ -66,3 +66,33 @@ test("redactArguments redacts secret-looking substrings inside string values", (
   });
   assert.deepEqual(result.redactedPaths, ["$.content", "$.note"]);
 });
+
+test("redactArguments redacts key-value secrets even when values contain s", () => {
+  const result = redactArguments(
+    {
+      text:
+        "password=secret token=sessionvalue api_key=sk_live_value&safe=true pwd=sassy",
+    },
+    [],
+  );
+
+  assert.deepEqual(result.value, {
+    text:
+      "password=[REDACTED] token=[REDACTED] api_key=[REDACTED]&safe=true pwd=[REDACTED]",
+  });
+  assert.deepEqual(result.redactedPaths, ["$.text"]);
+});
+
+test("redactArguments does not corrupt existing redaction markers", () => {
+  const result = redactArguments(
+    {
+      text: "password=[REDACTED]&safe=true token=[REDACTED]",
+    },
+    [],
+  );
+
+  assert.deepEqual(result.value, {
+    text: "password=[REDACTED]&safe=true token=[REDACTED]",
+  });
+  assert.deepEqual(result.redactedPaths, []);
+});
