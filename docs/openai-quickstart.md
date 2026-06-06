@@ -15,14 +15,16 @@ This guide is for a developer who already has a working `@openai/agents` app wit
 ## 1. Install And Pair Telegram
 
 ```bash
-npm install github:maokner/warden
+npm install @openai/agents zod @maokner/warden
+warden init --policy-only
 warden login --token <telegram-bot-token>
-warden init --template openai
 ```
 
-Do not install the unscoped `warden` package from npm; that package name belongs to an unrelated project. The library import path is `@maokner/warden`, and the CLI command is still `warden`.
+Do not install the unscoped `warden` package from npm; that package name belongs to an unrelated project. The library import path is `@maokner/warden` (and `@maokner/warden/openai`), and the CLI command is `warden`.
 
-Create the bot with BotFather first. `warden login` prints a `t.me` link. Open it on the phone that should approve actions, then tap Start.
+`warden init --policy-only` writes just `warden.yaml` (no scaffolded `agent.ts`), which is what you want when you already have an agent.
+
+Create the bot with BotFather first. `warden login` prints a `t.me` link. Open it on the phone that should approve actions, then tap Start. Prefer your own approval UI? Set `approval.method: callback` and pass `onApproval` to `configureWarden()`.
 
 The login command stores the bot token and approver chat id in `~/.warden/telegram.json` with `0600` permissions. The bot token does not need to live in `warden.yaml`.
 

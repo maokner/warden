@@ -4,8 +4,8 @@ import { configureWarden } from "@maokner/warden";
 import { guardTools } from "@maokner/warden/openai";
 
 // Run once:
+//   warden init --policy-only
 //   warden login --token <telegram-bot-token>
-//   warden init --template openai
 configureWarden();
 
 const emailClient = {

@@ -1,50 +1,57 @@
 # Warden
 
-**A local control layer that sits between an AI agent and the tools it can call.**
+**A guardrail for OpenAI agents. It sits between your `@openai/agents` agent and the tools it can call.**
 
-Agents can now query databases, send messages, edit files, hit APIs, and move money. Warden inspects every action an agent tries to take and decides — by policy — whether to **allow it, block it, or pause for a human** first. Every decision is written to an audit log.
+An agent with tools can query databases, send messages, edit files, hit APIs, and move money. Warden inspects every tool call your agent tries to make and decides — by policy — whether to **allow it, block it, or pause for a human** first. Every decision is written to an audit log.
 
 ![Warden action flow](docs/assets/warden-openai-flow.svg)
 
-The fastest path is to wrap the tools your existing app already passes to the OpenAI Agents SDK. Warden then classifies each tool call, applies your policy, asks for Telegram approval when needed, and records an audit event.
+Warden wraps the tools you pass to the OpenAI Agents SDK. It classifies each tool call, applies your policy, asks for approval when needed, and records an audit event — without you rebuilding the agent.
 
 ## Why
 
-Most teams connecting an agent to real systems can't answer simple questions: *What is this agent allowed to do? Which actions need approval? What exactly ran, and who signed off?* Warden is the boundary that answers them, without rebuilding your agent.
+Most teams connecting an agent to real systems can't answer simple questions: *What is this agent allowed to do? Which actions need approval? What exactly ran, and who signed off?* Warden is the boundary that answers them.
 
 ## How it works
 
-1. **Classify.** Warden reads each tool call's name, description, schema, arguments, and any SQL, then tags it with risk labels like `read`, `write`, `destructive`, `external_send`, `credential_access`, or `financial`.
+1. **Classify.** Warden reads each tool call's name, description, schema, and arguments, then tags it with risk labels like `read`, `write`, `destructive`, `external_send`, `credential_access`, or `financial`.
 2. **Decide.** Your policy maps each risk to a decision: `allow`, `deny`, `require_approval`, or `redact_then_allow`. Secure defaults ship out of the box — reads are allowed, writes and sends need approval, credential and financial actions are denied.
 3. **Enforce.** Allowed calls run. Denied calls never reach the tool. Approval-required calls pause for a human and fail closed if nobody responds.
 4. **Audit.** Every call produces a JSONL audit event — decision, risk labels, policy rule, arguments (with secrets redacted), result, and duration.
 
 ## Install
 
-Requires Node.js 22+.
+Requires Node.js 22+ and an `@openai/agents` app (or a brand-new project).
 
 ```bash
-pnpm install
-pnpm run build
+npm install @openai/agents zod @maokner/warden
 ```
 
-The examples below call `warden`. From a local clone that's `node dist/src/cli/index.js` — run `npm link` to put the `warden` CLI on your `PATH`. In a consuming app, install from GitHub until the scoped npm package is published.
+Do not install the unscoped `warden` package from npm; that name belongs to an unrelated project. The library import path is `@maokner/warden` (and `@maokner/warden/openai`), and the CLI command is `warden`.
 
-## OpenAI Agents SDK in 5 minutes
+There are two ways to adopt Warden.
 
-If you already have an `@openai/agents` app, Warden's fastest path is:
+## Path 1 — Start a new agent from scratch
+
+`warden init` scaffolds a runnable, already-guarded agent:
 
 ```bash
-npm install github:maokner/warden
+warden init                              # writes warden.yaml + agent.ts
+warden login --token <telegram-bot-token>  # pair a phone to approve actions
+export OPENAI_API_KEY=sk-...
+npx tsx agent.ts
+```
+
+`agent.ts` is a complete OpenAI agent whose tools are wrapped with Warden. The example tool sends an email, which is classified as `external_send` and pauses for approval — so the first run shows you the whole flow. Edit `agent.ts` to add your own tools; coverage stays automatic.
+
+## Path 2 — Add Warden to an existing agent
+
+Generate just the policy, then wrap the tools you already pass to the SDK:
+
+```bash
+warden init --policy-only                # writes warden.yaml only
 warden login --token <telegram-bot-token>
-warden init --template openai
 ```
-
-Do not install the unscoped `warden` package from npm; that name is already used by an unrelated project. The library import path is `@maokner/warden`, and the command name remains `warden`.
-
-Create the Telegram bot with BotFather once. `warden login` prints a `t.me` link; tap Start from the phone that should approve risky agent actions.
-
-Then wrap the tool definitions you already pass to the OpenAI Agents SDK:
 
 ```ts
 import { Agent, run, tool } from "@openai/agents";
@@ -75,81 +82,51 @@ const result = await run(agent, "Refund payment pi_123 for 25 dollars.");
 console.log(result.finalOutput);
 ```
 
-Risky calls pause and DM the Telegram approver. Reads can run. Credential and financial-looking actions are denied by default. Every decision lands in `.warden/audit.jsonl`.
+That is the whole change: move your tool definitions into a raw array, wrap the **whole array** with `guardTools()`, then `.map(tool)`. Wrapping the array (not one tool at a time) is what keeps coverage complete as tools are added.
 
-Wrap the whole array, not one tool at a time. That is how coverage stays complete as tools are added.
+Risky calls pause and ask the approver. Reads run. Credential and financial-looking actions are denied by default. Every decision lands in `.warden/audit.jsonl`.
 
-## Other integration paths
+## Approvals
 
-Warden also works outside the OpenAI Agents SDK.
+When a call needs approval, Warden stalls it until the timeout, then fails closed. How a human responds is the `approval.method`:
 
-### Any function, anywhere
+- **`telegram`** (default) — DMs the approver a poll (✅ Approve / ❌ Deny) with the redacted details; they tap a button on their phone. Link a device once with your own bot (created via @BotFather):
+  ```bash
+  warden login --token <bot-token>   # then tap the printed t.me link to pair
+  ```
+  The bot token and approver chat id are stored in `~/.warden/telegram.json` (never in `warden.yaml`). You bring your own bot — there is no Warden backend.
+- **`callback`** — wire your own UI / Slack / on-call by passing a function:
+  ```ts
+  configureWarden({ approval: { onApproval: async (req) => ({ decision: "approve", approver: "you" }) } });
+  ```
+- **`deny`** — never approves; the action is refused with a clear message. Zero setup, fully fail-closed.
 
-`guard` wraps a single function and returns one with the same signature; it throws if the call is blocked.
-
-```ts
-import { configureWarden, guard } from "@maokner/warden";
-
-configureWarden();
-
-const runSql = guard("database.run_sql", (args) => db.query(String(args.sql)), {
-  description: "Run SQL against the production database",
-});
-
-await runSql({ sql: "drop table users" }); // throws: destructive SQL is denied before db.query runs
-```
-
-### As an MCP gateway
-
-Add upstream MCP servers to `warden.yaml`, then run Warden as a single MCP server your agent connects to. Warden namespaces and policies every upstream tool, and prompts for risky calls on the terminal.
-
-```bash
-warden proxy --config warden.yaml
-```
-
-Generate the client config snippet:
-
-```bash
-warden setup claude --config warden.yaml   # or: warden setup codex
-```
-
-### As a local HTTP sidecar
-
-For non-TypeScript or non-MCP stacks, ask Warden for a decision over localhost:
-
-```bash
-warden serve --config warden.yaml --port 8787
-
-curl -s http://127.0.0.1:8787/v1/decide \
-  -H 'Content-Type: application/json' \
-  -d '{"tool":"database.run_sql","arguments":{"sql":"select id from users limit 1"}}'
-```
-
-The response includes the decision, risk classification, an audit event, and `forwardArguments` when your app may execute the action itself.
+Long timeouts assume a background/async agent — a synchronous chat request usually can't hold the connection open, so keep those short or use `callback`.
 
 ## Configuration
 
-A policy is a `warden.yaml` file. Generate a starter with `warden init --template openai`.
+A policy is a `warden.yaml` file. `warden init` generates a starter.
 
 ```yaml
 defaults:            # decision per risk label
   read: allow
   write: require_approval
   destructive: require_approval
+  external_send: require_approval
   credential_access: deny
   financial: deny
 
-tools:               # override decisions for specific tools
-  filesystem.read_file:
+tools:               # override decisions for specific tools (namespaced "openai.<name>")
+  openai.search_orders:
     decision: allow
-  filesystem.delete_file:
-    decision: deny
+  openai.send_invoice_email:
+    decision: require_approval
 
-redaction:           # fields scrubbed from audit logs
+redaction:           # fields scrubbed from approval messages + audit logs
   fields: [password, token, api_key, secret]
 
 approval:            # how approval-required actions are handled
-  method: telegram   # deny | local | callback | telegram
+  method: telegram   # deny | callback | telegram
   timeout: 5m        # 0s | 30s | 1m | 5m | 30m | 1h
 
 audit:
@@ -158,68 +135,39 @@ audit:
 
 A `deny` from a risk default always wins — a tool-specific rule can't weaken it.
 
-## Approvals
-
-When a call needs approval, Warden stalls it until the timeout, then fails closed. How a human responds is the `approval.method`:
-
-- **`deny`** — never approves; the action is refused with a clear message. Zero setup, fully fail-closed.
-- **`local`** — opens a localhost approval inbox (a web page and a JSON API) in your app's process. Approve from the browser, or from the CLI:
-  ```bash
-  warden approvals          # list what's waiting
-  warden approve <id>       # or: warden deny <id>
-  ```
-- **`telegram`** — DMs the approver a poll (✅ Approve / ❌ Deny) with the redacted details; they tap a button on their phone. Link a device once with your own bot (created via @BotFather):
-  ```bash
-  warden login --token <bot-token>   # then tap the printed t.me link to pair
-  ```
-  The bot token and approver chat id are stored in `~/.warden/telegram.json` (never in `warden.yaml`).
-- **`callback`** — you wire your own UI/Slack/on-call by passing a function:
-  ```ts
-  configureWarden({ approval: { onApproval: async (req) => ({ decision: "approve", approver: "you" }) } });
-  ```
-
-Long timeouts assume a background/async agent — a synchronous chat request usually can't hold the connection open, so keep those short or use `callback`.
-
 ## CLI
 
 ```
-warden init [--path warden.yaml] [--template default|openai|database]
-            [--approval-method deny|local|callback|telegram] [--approval-timeout 5m]
-warden policy test <call.json> [--config warden.yaml] [--json]
-warden inspect --config warden.yaml          # list upstream tools + their decisions
-warden proxy --config warden.yaml            # run the MCP gateway
-warden serve --config warden.yaml            # run the HTTP decision sidecar
-warden approvals [--json]                    # list pending approvals (local method)
-warden approve <id> / warden deny <id>       # resolve a pending approval
-warden login --token <bot-token>             # link a Telegram approver device
-warden audit tail [--limit 20] [--json]      # read the audit log
-warden doctor [--config warden.yaml]         # check for ways an agent could bypass Warden
-warden exec --config warden.yaml -- <cmd>    # launch a process with credentials scrubbed
+warden init [--path warden.yaml] [--agent agent.ts] [--policy-only] [--force]
+            [--approval-method deny|callback|telegram] [--approval-timeout 5m]
+warden policy test <call.json> [--config warden.yaml] [--json]   # preview a decision
+warden audit tail [--limit 20] [--json]                          # read the audit log
+warden login --token <bot-token>                                 # link a Telegram approver
 ```
 
-Try it against the included examples:
+Try a decision against the included example:
 
 ```bash
-warden init --template openai
 warden policy test examples/calls/stripe-refund.json --config examples/policies/warden.yaml
 ```
 
 ## What Warden does not do
 
-Warden is a control boundary, not a prompt or a general sandbox. It protects actions that are routed through `guardTools`, `guard`, the MCP gateway, or the HTTP sidecar. If your app keeps another unguarded path to the same API, Warden cannot approve or audit that path. Read the [Security Model](docs/security-model.md) before relying on it for enforcement.
+Warden is a control boundary, not a prompt or a general sandbox. It protects tool calls that are routed through `guardTools`. If your app keeps another unguarded path to the same API, Warden cannot approve or audit that path. Read the [Security Model](docs/security-model.md) before relying on it for enforcement.
 
 ## Documentation
 
-- [Documentation index](docs/README.md) - all guides and references
-- [OpenAI Agents SDK quickstart](docs/openai-quickstart.md) - add Warden to an existing app
-- [Migrating existing agents](docs/migrating-existing-agents.md) - wrap old tool arrays safely
-- [How Warden works](docs/how-warden-works.md) - classifier, policy, approval, audit
-- [Integration surfaces](docs/integration-surfaces.md) - OpenAI tools, generic guard, MCP, HTTP
-- [Security Model](docs/security-model.md) - what Warden can and cannot guarantee
+- [Documentation index](docs/README.md) — all guides and references
+- [Quickstart: a new agent](docs/from-scratch.md) — scaffold a guarded agent from scratch (Path 1)
+- [Quickstart: an existing agent](docs/openai-quickstart.md) — add Warden to an `@openai/agents` app (Path 2)
+- [Migrating existing agents](docs/migrating-existing-agents.md) — wrap old tool arrays safely
+- [How Warden works](docs/how-warden-works.md) — classifier, policy, approval, audit
+- [Security Model](docs/security-model.md) — what Warden can and cannot guarantee
 
 ## Development
 
 ```bash
+pnpm install
 pnpm test        # build + run the test suite
 pnpm typecheck
 ```

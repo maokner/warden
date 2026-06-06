@@ -37,7 +37,6 @@ export function defaultPolicyConfig(): PolicyConfig {
       fields: [...DEFAULT_REDACTION_FIELDS],
     },
     auditPath: DEFAULT_AUDIT_PATH,
-    upstreams: {},
     approval: {
       method: "deny",
       timeoutSeconds: DEFAULT_APPROVAL_TIMEOUT_SECONDS,

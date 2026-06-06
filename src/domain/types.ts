@@ -30,12 +30,7 @@ export const DECISION_TYPES = [
 
 export type DecisionType = (typeof DECISION_TYPES)[number];
 
-export type EnvironmentStatus =
-  | "monitoring_only"
-  | "partially_enforced"
-  | "enforced";
-
-export const APPROVAL_METHODS = ["deny", "local", "callback", "telegram"] as const;
+export const APPROVAL_METHODS = ["deny", "callback", "telegram"] as const;
 export type ApprovalMethod = (typeof APPROVAL_METHODS)[number];
 
 export interface GlobalApprovalConfig {
@@ -93,18 +88,7 @@ export interface PolicyConfig {
   tools: Record<string, ToolPolicy>;
   redaction: RedactionConfig;
   auditPath: string;
-  upstreams: Record<string, UpstreamConfig>;
   approval: GlobalApprovalConfig;
-}
-
-export interface UpstreamConfig {
-  transport: "stdio";
-  command: string;
-  args: string[];
-  env: Record<string, string>;
-  cwd?: string;
-  startupTimeoutMs: number;
-  toolTimeoutMs: number;
 }
 
 export interface PolicyDecision {

@@ -1,18 +1,17 @@
 # Warden Documentation
 
-Warden is for app-built agents that can take real actions: send messages, update databases, trigger workflows, call APIs, or move money. It sits between the agent and those tools so risky actions can be denied, approved in Telegram, and audited.
+Warden is a guardrail for OpenAI agents built with `@openai/agents`. It sits between the agent and its tools so risky tool calls can be denied, paused for human approval, and audited.
 
 ![Warden OpenAI flow](assets/warden-openai-flow.svg)
 
 ## Start Here
 
-- [OpenAI Agents SDK quickstart](openai-quickstart.md) - add Warden to an existing `@openai/agents` app in about five minutes.
-- [Migrate an existing agent](migrating-existing-agents.md) - how to move from direct tool execution to guarded tools without rewriting business logic.
-- [How Warden works](how-warden-works.md) - the classifier, policy engine, approval flow, executor gate, and audit log.
-- [Integration surfaces](integration-surfaces.md) - when to use OpenAI `guardTools`, generic `guard`, MCP gateway, or the HTTP sidecar.
+- [Quickstart: a new agent](from-scratch.md) — scaffold a runnable, already-guarded agent with `warden init` (Path 1).
+- [Quickstart: an existing agent](openai-quickstart.md) — add Warden to a working `@openai/agents` app in about five minutes (Path 2).
+- [Migrate an existing agent](migrating-existing-agents.md) — move from direct tool execution to guarded tools without rewriting business logic.
 
 ## Reference
 
-- [Approval workflow](approval-workflow.md) - local, Telegram, and callback approval behavior.
-- [MCP gateway](mcp-gateway.md) - stdio MCP proxy behavior and limits.
-- [Security model](security-model.md) - what Warden can and cannot guarantee for app-built agents.
+- [How Warden works](how-warden-works.md) — the classifier, policy engine, approval flow, executor gate, and audit log.
+- [Approval workflow](approval-workflow.md) — Telegram, callback, and deny approval behavior.
+- [Security model](security-model.md) — what Warden can and cannot guarantee.

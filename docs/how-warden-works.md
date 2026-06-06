@@ -97,22 +97,10 @@ The reviewer sees the tool, risk labels, policy rule, and redacted arguments. If
 
 Only the executor gate can call the underlying function. Denied, expired, or unsupported calls do not reach the real tool.
 
-For OpenAI function tools:
+The flow for OpenAI function tools:
 
 ```text
 Agent -> guardTools wrapper -> Warden decision -> original execute function
-```
-
-For MCP tools:
-
-```text
-Agent -> Warden MCP gateway -> Warden decision -> upstream MCP server
-```
-
-For HTTP sidecar users:
-
-```text
-App -> /v1/decide -> app executes only if Warden returns allowed
 ```
 
 ### 6. Audit
@@ -139,9 +127,9 @@ warden audit tail --limit 20
 
 ## What Warden Is Not
 
-Warden is not a prompt. It does not ask the model to behave. It controls whether the requested action reaches the real function, MCP server, or API call.
+Warden is not a prompt. It does not ask the model to behave. It controls whether the requested tool call reaches the real `execute` function.
 
-Warden is not a general sandbox. If your app exposes a second unguarded path to the same API, Warden cannot control that path. The fix is to route side-effecting actions through guarded functions, guarded MCP servers, or the HTTP sidecar.
+Warden is not a general sandbox. If your app exposes a second unguarded path to the same API, Warden cannot control that path. The fix is to route side-effecting actions through the agent's guarded tools.
 
 ## What Makes Adoption Easy
 

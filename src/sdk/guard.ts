@@ -101,44 +101,6 @@ export type GuardOptions = Omit<
   "tool" | "arguments" | "execute"
 >;
 
-/**
- * Wraps a function so every call is policy-checked, audited, and (if required)
- * approved. The returned function keeps the original signature and return
- * value; it throws WardenBlockedError when the call is denied or unapproved.
- */
-export function guard<A extends JsonObject = JsonObject, R extends JsonValue = JsonValue>(
-  tool: string,
-  fn: (args: A) => Promise<R> | R,
-  options: GuardOptions = {},
-): (args: A) => Promise<R> {
-  return async (args: A) => {
-    const result = await guardAction({
-      ...options,
-      tool,
-      arguments: args,
-      execute: (executionArgs) => fn(executionArgs as A),
-    });
-
-    if (!result.executed) {
-      throw new WardenBlockedError(result);
-    }
-
-    return result.output as R;
-  };
-}
-
-export class WardenBlockedError extends Error {
-  readonly result: HandleToolCallResult;
-
-  constructor(result: HandleToolCallResult) {
-    super(
-      `Warden blocked ${result.auditEvent.tool}: ${result.error ?? result.decision.reason}`,
-    );
-    this.name = "WardenBlockedError";
-    this.result = result;
-  }
-}
-
 function ensureNamespaced(tool: string, defaultUpstream: string): string {
   const trimmed = tool.trim();
   return trimmed.includes(".") ? trimmed : `${defaultUpstream}.${trimmed}`;

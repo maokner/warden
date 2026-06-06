@@ -1,49 +1,14 @@
-export const SAMPLE_POLICY = `defaults:
-  read: allow
-  write: require_approval
-  destructive: require_approval
-  external_send: require_approval
-  code_execution: require_approval
-  file_mutation: require_approval
-  network_egress: require_approval
-  credential_access: deny
-  financial: deny
-  sensitive_data: require_approval
-  unknown: require_approval
-
-tools:
-  filesystem.read_file:
-    decision: allow
-  filesystem.write_file:
-    decision: require_approval
-  filesystem.delete_file:
-    decision: deny
-
-redaction:
-  fields:
-    - password
-    - token
-    - api_key
-    - secret
-    - private_key
-    - authorization
-    - cookie
-
-# How approval-required actions are handled.
-#   method:  deny | local | callback | telegram
-#   timeout: 0s | 30s | 1m | 5m | 30m | 1h
-approval:
-  method: deny
-  timeout: 1m
-
-audit:
-  path: .warden/audit.jsonl
-`;
-
-export const OPENAI_POLICY = `# OpenAI Agents SDK quickstart policy.
-# Pair Telegram once with:
+/**
+ * The Warden policy template. `warden init` writes this to warden.yaml.
+ *
+ * Risky OpenAI Agent tool calls require approval; by default they DM a linked
+ * Telegram approver. Switch `approval.method` to `callback` to wire your own
+ * verification in code, or `deny` to fail closed with zero setup.
+ */
+export const WARDEN_POLICY = `# Warden policy for an OpenAI Agents SDK app.
+# Pair a Telegram approver once with:
 #   warden login --token <bot-token>
-defaults:
+defaults:            # decision per risk label
   read: allow
   write: require_approval
   destructive: require_approval
@@ -56,7 +21,15 @@ defaults:
   sensitive_data: require_approval
   unknown: require_approval
 
-redaction:
+# Override decisions for specific tools once you see real audit data.
+# Tool names are namespaced "openai.<your_tool_name>".
+# tools:
+#   openai.search_orders:
+#     decision: allow
+#   openai.send_invoice_email:
+#     decision: require_approval
+
+redaction:           # fields scrubbed from approval messages + audit logs
   fields:
     - password
     - token
@@ -65,10 +38,11 @@ redaction:
     - private_key
     - authorization
     - cookie
-    - stripe_secret_key
     - openai_api_key
 
-# Risky OpenAI Agent tool calls will DM the linked Telegram approver.
+# How approval-required actions are handled.
+#   method:  deny | callback | telegram
+#   timeout: 0s | 30s | 1m | 5m | 30m | 1h
 approval:
   method: telegram
   timeout: 5m
@@ -77,94 +51,6 @@ audit:
   path: .warden/audit.jsonl
 `;
 
-export const DATABASE_POLICY = `# Database-focused Warden policy.
-# Keep the policy and audit path outside an agent-writable workspace for hardened use.
-defaults:
-  read: allow
-  write: require_approval
-  destructive: deny
-  external_send: deny
-  code_execution: deny
-  file_mutation: deny
-  network_egress: deny
-  credential_access: deny
-  financial: deny
-  sensitive_data: require_approval
-  unknown: require_approval
-
-tools:
-  # Replace or extend these names with exact tool names from "warden inspect".
-  postgres.query:
-    approval:
-      require_reason: true
-  postgres.execute:
-    approval:
-      require_reason: true
-  postgres.run_query:
-    approval:
-      require_reason: true
-  mysql.query:
-    approval:
-      require_reason: true
-  mysql.execute:
-    approval:
-      require_reason: true
-  sqlite.query:
-    approval:
-      require_reason: true
-  sqlite.execute:
-    approval:
-      require_reason: true
-
-redaction:
-  fields:
-    - password
-    - token
-    - api_key
-    - secret
-    - private_key
-    - authorization
-    - cookie
-    - database_url
-    - connection_string
-    - dsn
-    - pgpassword
-    - mysql_pwd
-    - uri
-
-# How approval-required actions are handled.
-#   method:  deny | local | callback | telegram
-#   timeout: 0s | 30s | 1m | 5m | 30m | 1h
-approval:
-  method: local
-  timeout: 5m
-
-audit:
-  path: .warden/audit.jsonl
-`;
-
-export const POLICY_TEMPLATES = {
-  default: SAMPLE_POLICY,
-  openai: OPENAI_POLICY,
-  database: DATABASE_POLICY,
-} as const;
-
-export type PolicyTemplateName = keyof typeof POLICY_TEMPLATES;
-
-export function policyTemplateNames(): PolicyTemplateName[] {
-  return Object.keys(POLICY_TEMPLATES) as PolicyTemplateName[];
-}
-
-export function policyTemplate(name: string): string {
-  if (!isPolicyTemplateName(name)) {
-    throw new Error(
-      `Unknown policy template "${name}". Available templates: ${policyTemplateNames().join(", ")}.`,
-    );
-  }
-
-  return POLICY_TEMPLATES[name];
-}
-
-function isPolicyTemplateName(name: string): name is PolicyTemplateName {
-  return Object.hasOwn(POLICY_TEMPLATES, name);
+export function wardenPolicyTemplate(): string {
+  return WARDEN_POLICY;
 }

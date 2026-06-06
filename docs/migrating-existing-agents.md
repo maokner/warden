@@ -81,14 +81,14 @@ configureWarden({
 
 For most apps, do not pass policy inline. Keep it in `warden.yaml` so operators can inspect and review it separately from code changes.
 
-## Step 4. Start With The OpenAI Template
+## Step 4. Generate The Starter Policy
 
 ```bash
+warden init --policy-only
 warden login --token <telegram-bot-token>
-warden init --template openai
 ```
 
-The generated template is intentionally conservative:
+The generated policy is intentionally conservative:
 
 - `read: allow`
 - `write`, `external_send`, `network_egress`, `code_execution`: `require_approval`
@@ -189,13 +189,7 @@ Then confirm the agent is built from the guarded array only:
 const agent = new Agent({ name: "support", tools });
 ```
 
-For side effects outside the OpenAI tool array, use `guard()` directly around the function:
-
-```ts
-const sendEmail = guard("app.send_email", rawSendEmail, {
-  description: "Send an email to a customer",
-});
-```
+If a side effect lives outside the agent's tool array, expose it to the agent as a tool and wrap it with `guardTools` too. Warden guards what the agent calls through guarded tools; a side effect the app triggers on its own path is not covered (see the [Security Model](security-model.md)).
 
 ## Migration Checklist
 

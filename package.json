@@ -1,7 +1,7 @@
 {
   "name": "@maokner/warden",
   "version": "0.1.0",
-  "description": "A local action-control layer for AI agents.",
+  "description": "A local guardrail for OpenAI Agents SDK apps — classify, approve, and audit every tool call.",
   "type": "module",
   "exports": {
     ".": {
@@ -27,8 +27,7 @@
     "prebuild": "node scripts/clean-dist.mjs",
     "build": "tsc -p tsconfig.json",
     "test": "pnpm run build && node --test \"dist/tests/**/*.test.js\"",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "compat:clients": "pnpm run build && node scripts/client-compat-smoke.mjs"
+    "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
     "yaml": "^2.8.1"

@@ -22,16 +22,6 @@ redaction:
     - password
 audit:
   path: .warden/custom.jsonl
-upstreams:
-  filesystem:
-    transport: stdio
-    command: node
-    args:
-      - fake-server.js
-    env:
-      EXAMPLE_TOKEN: value
-    startup_timeout_ms: 500
-    tool_timeout_ms: 750
 `);
 
   assert.equal(config.defaults.read, "allow");
@@ -50,16 +40,6 @@ upstreams:
   assert.ok(config.redaction.fields.includes("private_key"));
   assert.ok(config.redaction.fields.includes("authorization"));
   assert.equal(config.auditPath, ".warden/custom.jsonl");
-  assert.deepEqual(config.upstreams.filesystem, {
-    transport: "stdio",
-    command: "node",
-    args: ["fake-server.js"],
-    env: {
-      EXAMPLE_TOKEN: "value",
-    },
-    startupTimeoutMs: 500,
-    toolTimeoutMs: 750,
-  });
 });
 
 test("parsePolicyConfig rejects invalid risk labels", () => {
@@ -106,27 +86,14 @@ approval:
   );
 });
 
-test("parsePolicyConfig rejects unsupported upstream transports", () => {
-  assert.throws(
-    () =>
-      parsePolicyConfig(`
-upstreams:
-  github:
-    transport: http
-    command: server
-`),
-    /transport must be "stdio"/,
-  );
-});
-
 test("parsePolicyConfig parses the approval block with presets", () => {
   const config = parsePolicyConfig(`
 approval:
-  method: local
+  method: callback
   timeout: 5m
 `);
 
-  assert.equal(config.approval.method, "local");
+  assert.equal(config.approval.method, "callback");
   assert.equal(config.approval.timeoutSeconds, 300);
 });
 

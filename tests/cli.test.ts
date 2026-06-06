@@ -8,18 +8,12 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { AddressInfo } from "node:net";
-import type { Server } from "node:http";
 import test from "node:test";
 import assert from "node:assert/strict";
 import { runCli } from "../src/cli/app.js";
-import { createApprovalRequest, resolveApproval } from "../src/approval/approval.js";
-import { ApprovalQueue } from "../src/approval/queue.js";
-import { createApprovalServer } from "../src/approval/server.js";
-import { makeToolRef } from "../src/domain/tool-ref.js";
 import { startFakeTelegram } from "./fixtures/fake-telegram.js";
 
-test("CLI init creates a policy and refuses accidental overwrite", async () => {
+test("CLI init scaffolds a policy + runnable agent and refuses accidental overwrite", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
   const output = createOutput();
 
@@ -30,50 +24,79 @@ test("CLI init creates a policy and refuses accidental overwrite", async () => {
     assert.equal(first, 0);
     assert.equal(second, 1);
     assert.equal(existsSync(join(dir, "warden.yaml")), true);
-    assert.match(readFileSync(join(dir, "warden.yaml"), "utf8"), /defaults:/);
+    assert.equal(existsSync(join(dir, "agent.ts")), true);
+    assert.match(readFileSync(join(dir, "warden.yaml"), "utf8"), /method: telegram/);
+    assert.match(readFileSync(join(dir, "agent.ts"), "utf8"), /guardTools/);
+    assert.match(output.stdout(), /Created .*agent\.ts/);
     assert.match(output.stderr(), /already exists/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("CLI init can create the database policy template", async () => {
+test("CLI init --policy-only writes only warden.yaml", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
   const output = createOutput();
 
   try {
-    const code = await runCli(
-      ["init", "--template", "database"],
-      { cwd: dir, ...output.io },
-    );
-    const policy = readFileSync(join(dir, "warden.yaml"), "utf8");
+    const code = await runCli(["init", "--policy-only"], { cwd: dir, ...output.io });
 
     assert.equal(code, 0);
-    assert.match(policy, /Database-focused Warden policy/);
-    assert.match(policy, /destructive: deny/);
-    assert.match(policy, /postgres\.query/);
-    assert.match(output.stdout(), /database template/);
+    assert.equal(existsSync(join(dir, "warden.yaml")), true);
+    assert.equal(existsSync(join(dir, "agent.ts")), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("CLI init can create the OpenAI Telegram quickstart policy template", async () => {
+test("CLI init --force overwrites existing files", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    await runCli(["init"], { cwd: dir, ...output.io });
+    const code = await runCli(["init", "--force"], { cwd: dir, ...output.io });
+
+    assert.equal(code, 0);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI init applies approval method and timeout overrides without touching comments", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
   const output = createOutput();
 
   try {
     const code = await runCli(
-      ["init", "--template", "openai"],
+      ["init", "--policy-only", "--approval-method", "callback", "--approval-timeout", "30s"],
       { cwd: dir, ...output.io },
     );
     const policy = readFileSync(join(dir, "warden.yaml"), "utf8");
 
     assert.equal(code, 0);
-    assert.match(policy, /OpenAI Agents SDK quickstart policy/);
-    assert.match(policy, /method: telegram/);
-    assert.match(policy, /timeout: 5m/);
-    assert.match(output.stdout(), /openai template/);
+    assert.match(policy, /^\s+method: callback$/m);
+    assert.match(policy, /^\s+timeout: 30s$/m);
+    // The option comment lines must survive the substitution.
+    assert.match(policy, /#\s+method:\s+deny \| callback \| telegram/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI init rejects an invalid approval method", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    const code = await runCli(
+      ["init", "--policy-only", "--approval-method", "local"],
+      { cwd: dir, ...output.io },
+    );
+
+    assert.equal(code, 1);
+    assert.match(output.stderr(), /--approval-method must be one of/);
+    assert.equal(existsSync(join(dir, "warden.yaml")), false);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -152,359 +175,16 @@ test("CLI policy test can write an audit event and audit tail can read it", asyn
   }
 });
 
-test("CLI doctor returns monitoring_only when direct MCP exists", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+test("CLI help lists only the supported commands", async () => {
   const output = createOutput();
+  const code = await runCli(["help"], { cwd: process.cwd(), ...output.io });
 
-  try {
-    writeFileSync(
-      join(dir, ".mcp.json"),
-      JSON.stringify({
-        mcpServers: {
-          github: { command: "github-mcp-server" },
-        },
-      }),
-    );
-
-    const code = await runCli(["doctor", "--json"], { cwd: dir, ...output.io });
-    const report = JSON.parse(output.stdout()) as {
-      status: string;
-      issues: Array<{ code: string }>;
-    };
-
-    assert.equal(code, 2);
-    assert.equal(report.status, "monitoring_only");
-    assert.ok(report.issues.some((issue) => issue.code === "direct_mcp_server"));
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI inspect emits upstream tool inventory as JSON", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    writeFakeUpstreamConfig(dir);
-
-    const code = await runCli(
-      ["inspect", "--config", "warden.yaml", "--json"],
-      { cwd: dir, ...output.io },
-    );
-    const result = JSON.parse(output.stdout()) as {
-      tools: Array<{
-        name: string;
-        upstream: string;
-        upstreamTool: string;
-        riskLabels: string[];
-        decision: string;
-        policyRule: string;
-      }>;
-    };
-
-    assert.equal(code, 0);
-    assert.deepEqual(
-      result.tools.map((tool) => tool.name),
-      ["fixture.read_echo", "fixture.write_echo"],
-    );
-    assert.equal(result.tools[0]?.name, "fixture.read_echo");
-    assert.equal(result.tools[0]?.upstream, "fixture");
-    assert.equal(result.tools[0]?.upstreamTool, "read_echo");
-    assert.deepEqual(result.tools[0]?.riskLabels, ["read"]);
-    assert.equal(result.tools[0]?.decision, "allow");
-    assert.equal(result.tools[0]?.policyRule, "defaults.read");
-    assert.equal(result.tools[1]?.decision, "require_approval");
-    assert.deepEqual(result.tools[1]?.riskLabels, ["write"]);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI inspect emits readable text inventory", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    writeFakeUpstreamConfig(dir);
-
-    const code = await runCli(
-      ["inspect", "--config", "warden.yaml"],
-      { cwd: dir, ...output.io },
-    );
-
-    assert.equal(code, 0);
-    assert.match(output.stdout(), /fixture\.read_echo/);
-    assert.match(output.stdout(), /decision: allow/);
-    assert.match(output.stdout(), /fixture\.write_echo/);
-    assert.match(output.stdout(), /decision: require_approval/);
-    assert.equal(output.stderr(), "");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI inspect command requires configured upstreams", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    const code = await runCli(["inspect"], {
-      cwd: dir,
-      ...output.io,
-    });
-
-    assert.equal(code, 1);
-    assert.match(output.stderr(), /requires at least one configured upstream/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI setup codex prints a Warden-only MCP config snippet", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    const code = await runCli(
-      ["setup", "codex", "--config", "security/warden.yaml"],
-      { cwd: dir, ...output.io },
-    );
-
-    assert.equal(code, 0);
-    assert.match(output.stdout(), /\[mcp_servers\.warden\]/);
-    assert.match(output.stdout(), /command = "warden"/);
-    assert.match(output.stdout(), /"proxy"/);
-    assert.match(output.stdout(), /security\/warden.yaml/);
-    assert.doesNotMatch(output.stdout(), /\[mcp_servers\.github\]/);
-    assert.equal(output.stderr(), "");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI setup claude prints a Warden-only MCP config snippet", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    const code = await runCli(
-      ["setup", "claude", "--config", "security/warden.yaml"],
-      { cwd: dir, ...output.io },
-    );
-    const parsed = JSON.parse(output.stdout()) as {
-      mcpServers: Record<string, { command: string; args: string[] }>;
-    };
-
-    assert.equal(code, 0);
-    assert.deepEqual(Object.keys(parsed.mcpServers), ["warden"]);
-    assert.equal(parsed.mcpServers.warden?.command, "warden");
-    assert.deepEqual(parsed.mcpServers.warden?.args.slice(0, 2), [
-      "proxy",
-      "--config",
-    ]);
-    assert.equal(output.stderr(), "");
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI proxy command requires configured upstreams", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    const code = await runCli(["proxy"], {
-      cwd: dir,
-      ...output.io,
-    });
-
-    assert.equal(code, 1);
-    assert.match(output.stderr(), /requires at least one configured upstream/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI proxy reports missing explicit config through runCli", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    const code = await runCli(["proxy", "--config", "missing.yaml"], {
-      cwd: dir,
-      ...output.io,
-    });
-
-    assert.equal(code, 1);
-    assert.match(output.stderr(), /Policy config not found/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI exec launches with protected env scrubbed and Warden-only temp config", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-  const previousOpenAiKey = process.env["OPENAI_API_KEY"];
-  const previousDatabaseUrl = process.env["DATABASE_URL"];
-
-  try {
-    process.env["OPENAI_API_KEY"] = "sk-test";
-    process.env["DATABASE_URL"] = "postgres://user:pass@example/db";
-    writeFileSync(join(dir, "warden.yaml"), "defaults: {}\n");
-
-    const script = [
-      "const fs = require('node:fs');",
-      "const configPath = process.env.CODEX_HOME + '/config.toml';",
-      "console.log(JSON.stringify({",
-      "openai: process.env.OPENAI_API_KEY ?? null,",
-      "database: process.env.DATABASE_URL ?? null,",
-      "home: process.env.HOME,",
-      "codexHome: process.env.CODEX_HOME,",
-      "wardenExec: process.env.WARDEN_EXEC,",
-      "config: fs.readFileSync(configPath, 'utf8')",
-      "}));",
-    ].join("");
-
-    const code = await runCli(
-      ["exec", "--config", "warden.yaml", "--", process.execPath, "-e", script],
-      { cwd: dir, ...output.io },
-    );
-    const result = JSON.parse(output.stdout()) as {
-      openai: string | null;
-      database: string | null;
-      home: string;
-      codexHome: string;
-      wardenExec: string;
-      config: string;
-    };
-
-    assert.equal(code, 0);
-    assert.equal(result.openai, null);
-    assert.equal(result.database, null);
-    assert.match(result.home, /warden-exec-/);
-    assert.match(result.codexHome, /warden-exec-/);
-    assert.equal(result.wardenExec, "1");
-    assert.match(result.config, /\[mcp_servers\.warden\]/);
-    assert.match(result.config, /"proxy"/);
-    assert.match(result.config, /warden\.yaml/);
-    assert.match(output.stderr(), /scrubbed HOME=/);
-  } finally {
-    restoreEnv("OPENAI_API_KEY", previousOpenAiKey);
-    restoreEnv("DATABASE_URL", previousDatabaseUrl);
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-function writeFakeUpstreamConfig(dir: string): void {
-  const fakeUpstreamPath = join(
-    process.cwd(),
-    "dist/tests/fixtures/fake-mcp-upstream.js",
-  );
-
-  writeFileSync(
-    join(dir, "warden.yaml"),
-    `defaults:
-  read: allow
-  write: require_approval
-  destructive: require_approval
-  external_send: require_approval
-  code_execution: require_approval
-  file_mutation: require_approval
-  network_egress: require_approval
-  credential_access: deny
-  financial: deny
-  sensitive_data: require_approval
-  unknown: require_approval
-
-upstreams:
-  fixture:
-    transport: stdio
-    command: ${JSON.stringify(process.execPath)}
-    args:
-      - ${JSON.stringify(fakeUpstreamPath)}
-    startup_timeout_ms: 1000
-    tool_timeout_ms: 1000
-`,
-  );
-}
-
-function restoreEnv(key: string, value: string | undefined): void {
-  if (value === undefined) {
-    delete process.env[key];
-    return;
-  }
-
-  process.env[key] = value;
-}
-
-test("CLI init applies approval method and timeout overrides", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
-  const output = createOutput();
-
-  try {
-    const code = await runCli(
-      ["init", "--approval-method", "local", "--approval-timeout", "30s"],
-      { cwd: dir, ...output.io },
-    );
-    const policy = readFileSync(join(dir, "warden.yaml"), "utf8");
-
-    assert.equal(code, 0);
-    assert.match(policy, /method: local/);
-    assert.match(policy, /timeout: 30s/);
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("CLI approvals lists pending approvals and approve resolves them", async () => {
-  const queue = new ApprovalQueue();
-  const server = createApprovalServer({ queue });
-  const port = await listenOnPort(server);
-  const url = `http://127.0.0.1:${port}`;
-
-  const ref = makeToolRef("db", "run_sql");
-  const request = createApprovalRequest({
-    call: {
-      ref,
-      arguments: { sql: "update users set x = 1" },
-      metadata: { ref, description: "", inputSchema: {}, annotations: {} },
-    },
-    decision: {
-      decision: "require_approval",
-      reason: "needs review",
-      rule: "defaults.write",
-      riskLabels: ["write"],
-      approval: { timeoutSeconds: 60 },
-    },
-    redactionFields: [],
-  });
-  const resolution = resolveApproval(request, queue);
-  await new Promise((resolve) => setImmediate(resolve));
-
-  try {
-    const listOutput = createOutput();
-    const listCode = await runCli(["approvals", "--url", url], {
-      cwd: process.cwd(),
-      ...listOutput.io,
-    });
-    assert.equal(listCode, 0);
-    assert.match(listOutput.stdout(), /db\.run_sql/);
-
-    const approveOutput = createOutput();
-    const approveCode = await runCli(
-      ["approve", request.id, "--url", url, "--approver", "alice"],
-      { cwd: process.cwd(), ...approveOutput.io },
-    );
-    assert.equal(approveCode, 0);
-    assert.match(approveOutput.stdout(), /Approved/);
-
-    const result = await resolution;
-    assert.equal(result.status, "approved");
-    assert.equal(result.approver, "alice");
-  } finally {
-    server.close();
-  }
+  assert.equal(code, 0);
+  assert.match(output.stdout(), /warden init/);
+  assert.match(output.stdout(), /warden policy test/);
+  assert.match(output.stdout(), /warden audit tail/);
+  assert.match(output.stdout(), /warden login/);
+  assert.doesNotMatch(output.stdout(), /proxy|serve|inspect|doctor|exec/);
 });
 
 test("CLI login pairs a Telegram device and saves credentials with 0600 perms", async () => {
@@ -558,14 +238,6 @@ async function waitForMatch(
     await new Promise((resolve) => setTimeout(resolve, 5));
   }
   throw new Error("pairing link was not printed");
-}
-
-function listenOnPort(server: Server): Promise<number> {
-  return new Promise((resolve) => {
-    server.listen(0, "127.0.0.1", () => {
-      resolve((server.address() as AddressInfo).port);
-    });
-  });
 }
 
 function createOutput(): {

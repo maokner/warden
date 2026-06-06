@@ -1,21 +1,16 @@
 # Security Model
 
-Warden is an action-control boundary for app-built agents.
+Warden is an action-control boundary for OpenAI agents built with `@openai/agents`.
 
-It is meant for agents you build into products, internal tools, support workflows, operations dashboards, and backend apps. The primary case is not a coding agent editing a repository; it is an application agent that can call functions, MCP tools, or APIs with real side effects.
+It is meant for agents you build into products, internal tools, support workflows, operations dashboards, and backend apps — an application agent that can call tools with real side effects.
 
-![Warden integration surfaces](assets/warden-integration-surfaces.svg)
+![Warden OpenAI flow](assets/warden-openai-flow.svg)
 
 ## Core Claim
 
-Warden can control an action when that action is routed through Warden before it reaches the real executor.
-
-Examples:
+Warden can control a tool call when that call is routed through Warden before it reaches the real executor:
 
 - `guardTools()` wraps OpenAI Agents SDK function tools before `execute` runs.
-- `guard()` wraps a side-effecting JavaScript function.
-- `warden proxy` sits in front of upstream MCP tools.
-- `warden serve` lets a non-TypeScript app ask for a decision before it acts.
 
 Warden cannot control a second path that bypasses it. If your app still calls Stripe, Slack, SendGrid, a database, or an internal API directly from another unguarded path, Warden cannot approve or audit that path.
 
@@ -41,7 +36,7 @@ Warden treats the model's requested action as untrusted until policy allows it o
 The guarded executor is the only place where a model-requested action can become a side effect.
 
 ```text
-model-selected tool call -> Warden decision -> original function or upstream tool
+model-selected tool call -> Warden decision -> original execute function
 ```
 
 Denied and expired approvals never reach the original function.
@@ -81,7 +76,7 @@ If the app keeps both guarded and unguarded versions of a side-effect function, 
 
 Control:
 
-- route side effects through `guardTools`, `guard`, MCP gateway, or sidecar decisions
+- route side effects through the agent's guarded tools (`guardTools`)
 - search for direct calls during migration
 - keep risky functions in one module and export only the guarded version
 

@@ -10,8 +10,6 @@ import { defaultPolicyConfig } from "../src/policy/defaults.js";
 
 afterEach(() => resetWarden());
 
-const tick = () => new Promise((resolve) => setImmediate(resolve));
-
 test("deny method blocks approval-required calls", async () => {
   configureWarden({
     config: defaultPolicyConfig(),
@@ -54,34 +52,44 @@ test("callback method approves through the configured callback", async () => {
   assert.equal(result.approval?.approver, "human");
 });
 
-test("local method parks approval-required calls in the queue", async () => {
-  const runtime = configureWarden({
-    config: defaultPolicyConfig(),
-    approval: { method: "local", port: 0 },
-    auditPath: false,
-  });
+test("telegram method without credentials fails closed", async () => {
+  const savedToken = process.env["WARDEN_TELEGRAM_TOKEN"];
+  const savedChat = process.env["WARDEN_TELEGRAM_CHAT_ID"];
+  delete process.env["WARDEN_TELEGRAM_TOKEN"];
+  delete process.env["WARDEN_TELEGRAM_CHAT_ID"];
 
-  assert.ok(runtime.server);
-  assert.ok(runtime.queue);
+  try {
+    configureWarden({
+      config: defaultPolicyConfig(),
+      approval: {
+        method: "telegram",
+        // Point at a path that does not exist so no machine credentials leak in.
+        credentialsPath: "/nonexistent/warden-telegram-test.json",
+      },
+      auditPath: false,
+    });
 
-  const pending = guardAction({
-    tool: "db.update_row",
-    description: "Update a row",
-    arguments: { id: 1 },
-    execute: async () => "ok",
-  });
+    let executed = false;
+    const result = await guardAction({
+      tool: "db.update_row",
+      description: "Update a row",
+      arguments: { id: 1 },
+      execute: async () => {
+        executed = true;
+        return "ok";
+      },
+    });
 
-  await tick();
-  const queue = runtime.queue;
-  assert.ok(queue);
-  assert.equal(queue.list().length, 1);
-
-  const id = queue.list()[0]?.id as string;
-  assert.equal(queue.approve(id, { approver: "alice" }), true);
-
-  const result = await pending;
-  assert.equal(result.executed, true);
-  assert.equal(result.approval?.approver, "alice");
+    assert.equal(executed, false);
+    assert.equal(result.executed, false);
+  } finally {
+    if (savedToken !== undefined) {
+      process.env["WARDEN_TELEGRAM_TOKEN"] = savedToken;
+    }
+    if (savedChat !== undefined) {
+      process.env["WARDEN_TELEGRAM_CHAT_ID"] = savedChat;
+    }
+  }
 });
 
 test("getWardenRuntime returns the active runtime; resetWarden clears it", () => {

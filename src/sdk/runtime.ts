@@ -1,5 +1,4 @@
 import { existsSync } from "node:fs";
-import type { Server } from "node:http";
 import { resolve } from "node:path";
 import type { ApprovalMethod, PolicyConfig } from "../domain/types.js";
 import type { ApprovalReviewer } from "../approval/approval.js";
@@ -8,12 +7,6 @@ import {
   denyReviewer,
   type ApprovalCallback,
 } from "../approval/methods.js";
-import { ApprovalQueue } from "../approval/queue.js";
-import {
-  createApprovalServer,
-  DEFAULT_APPROVAL_HOST,
-  DEFAULT_APPROVAL_PORT,
-} from "../approval/server.js";
 import { TelegramApprovalChannel } from "../approval/telegram.js";
 import { TelegramClient, type TelegramClientOptions } from "../telegram/client.js";
 import { loadTelegramCredentials } from "../telegram/credentials.js";
@@ -28,8 +21,6 @@ export interface ConfigureWardenOptions {
   approval?: {
     method?: ApprovalMethod;
     onApproval?: ApprovalCallback;
-    host?: string;
-    port?: number;
     token?: string;
     chatId?: number;
     credentialsPath?: string;
@@ -41,9 +32,6 @@ export interface WardenRuntime {
   config: PolicyConfig;
   auditPath: string | undefined;
   reviewer: ApprovalReviewer | undefined;
-  queue: ApprovalQueue | undefined;
-  server: Server | undefined;
-  approvalUrl: string | undefined;
   close: () => void;
 }
 
@@ -68,11 +56,7 @@ export function configureWarden(
     config,
     auditPath,
     reviewer: channel.reviewer,
-    queue: channel.queue,
-    server: channel.server,
-    approvalUrl: channel.approvalUrl,
     close: () => {
-      channel.server?.close();
       void channel.telegram?.stop();
       if (current === runtime) {
         current = undefined;
@@ -130,19 +114,11 @@ function resolveMethod(
 
 interface ApprovalChannel {
   reviewer: ApprovalReviewer | undefined;
-  queue: ApprovalQueue | undefined;
-  server: Server | undefined;
-  approvalUrl: string | undefined;
   telegram?: TelegramApprovalChannel;
 }
 
 function denyChannel(): ApprovalChannel {
-  return {
-    reviewer: denyReviewer(),
-    queue: undefined,
-    server: undefined,
-    approvalUrl: undefined,
-  };
+  return { reviewer: denyReviewer() };
 }
 
 function resolveChannel(
@@ -157,35 +133,11 @@ function resolveChannel(
       );
       return denyChannel();
     }
-    return {
-      reviewer: callbackReviewer(onApproval),
-      queue: undefined,
-      server: undefined,
-      approvalUrl: undefined,
-    };
+    return { reviewer: callbackReviewer(onApproval) };
   }
 
   if (method === "telegram") {
     return resolveTelegramChannel(options);
-  }
-
-  if (method === "local") {
-    const host = options.approval?.host ?? DEFAULT_APPROVAL_HOST;
-    const port = options.approval?.port ?? DEFAULT_APPROVAL_PORT;
-    const queue = new ApprovalQueue();
-    const server = createApprovalServer({ queue });
-    server.on("error", (error) => {
-      process.stderr.write(`Warden approval inbox error: ${error.message}\n`);
-    });
-    server.listen(port, host, () => {
-      process.stderr.write(`Warden approval inbox: http://${host}:${port}\n`);
-    });
-    return {
-      reviewer: queue,
-      queue,
-      server,
-      approvalUrl: port === 0 ? undefined : `http://${host}:${port}`,
-    };
   }
 
   return denyChannel();
@@ -215,9 +167,6 @@ function resolveTelegramChannel(options: ConfigureWardenOptions): ApprovalChanne
 
   return {
     reviewer: channel,
-    queue: undefined,
-    server: undefined,
-    approvalUrl: undefined,
     telegram: channel,
   };
 }

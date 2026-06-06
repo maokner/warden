@@ -12,7 +12,6 @@ import {
   type PolicyConfig,
   type RiskLabel,
   type ToolPolicy,
-  type UpstreamConfig,
 } from "../domain/types.js";
 import { parseTimeout } from "../approval/methods.js";
 import { defaultPolicyConfig } from "./defaults.js";
@@ -40,7 +39,6 @@ export function normalizePolicyConfig(value: unknown): PolicyConfig {
     tools: normalizeTools(root["tools"]),
     redaction: normalizeRedaction(root["redaction"], base.redaction.fields),
     auditPath: normalizeAuditPath(root["audit"], base.auditPath),
-    upstreams: normalizeUpstreams(root["upstreams"]),
     approval: normalizeGlobalApproval(root["approval"], base.approval),
   };
 }
@@ -249,114 +247,6 @@ function normalizeAuditPath(value: unknown, basePath: string): string {
   }
 
   return rawPath;
-}
-
-function normalizeUpstreams(value: unknown): Record<string, UpstreamConfig> {
-  if (value === undefined) {
-    return {};
-  }
-
-  const object = expectObject(value, "upstreams");
-  const upstreams: Record<string, UpstreamConfig> = {};
-
-  for (const [name, rawConfig] of Object.entries(object)) {
-    if (!/^[A-Za-z0-9_-]+$/.test(name)) {
-      throw new Error(`upstreams.${name} must use only letters, numbers, underscores, and dashes.`);
-    }
-
-    const config = expectObject(rawConfig, `upstreams.${name}`);
-    const transport = config["transport"] ?? "stdio";
-    if (transport !== "stdio") {
-      throw new Error(`upstreams.${name}.transport must be "stdio".`);
-    }
-
-    if (typeof config["command"] !== "string" || !config["command"].trim()) {
-      throw new Error(`upstreams.${name}.command must be a non-empty string.`);
-    }
-
-    upstreams[name] = {
-      transport: "stdio",
-      command: config["command"],
-      args: normalizeStringList(config["args"], `upstreams.${name}.args`),
-      env: normalizeEnv(config["env"], `upstreams.${name}.env`),
-      startupTimeoutMs: normalizePositiveInteger(
-        config["startup_timeout_ms"],
-        `upstreams.${name}.startup_timeout_ms`,
-        10_000,
-      ),
-      toolTimeoutMs: normalizePositiveInteger(
-        config["tool_timeout_ms"],
-        `upstreams.${name}.tool_timeout_ms`,
-        60_000,
-      ),
-    };
-
-    if (config["cwd"] !== undefined) {
-      if (typeof config["cwd"] !== "string" || !config["cwd"].trim()) {
-        throw new Error(`upstreams.${name}.cwd must be a non-empty string.`);
-      }
-      upstreams[name].cwd = config["cwd"];
-    }
-  }
-
-  return upstreams;
-}
-
-function normalizeStringList(value: unknown, path: string): string[] {
-  if (value === undefined) {
-    return [];
-  }
-
-  if (!Array.isArray(value)) {
-    throw new Error(`${path} must be a list.`);
-  }
-
-  return value.map((entry, index) => {
-    if (typeof entry !== "string") {
-      throw new Error(`${path}[${index}] must be a string.`);
-    }
-
-    return entry;
-  });
-}
-
-function normalizeEnv(value: unknown, path: string): Record<string, string> {
-  if (value === undefined) {
-    return {};
-  }
-
-  const object = expectObject(value, path);
-  const env: Record<string, string> = {};
-
-  for (const [key, entry] of Object.entries(object)) {
-    if (typeof entry !== "string") {
-      throw new Error(`${path}.${key} must be a string.`);
-    }
-
-    env[key] = entry;
-  }
-
-  return env;
-}
-
-function normalizePositiveInteger(
-  value: unknown,
-  path: string,
-  fallback: number,
-): number {
-  if (value === undefined) {
-    return fallback;
-  }
-
-  if (
-    typeof value !== "number" ||
-    !Number.isInteger(value) ||
-    value <= 0
-  ) {
-    throw new Error(`${path} must be a positive integer.`);
-  }
-
-  return value;
 }
 
 function parseDecision(value: unknown, path: string): DecisionType {
