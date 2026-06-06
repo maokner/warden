@@ -15,7 +15,10 @@ export interface OpenAIToolDefinition {
   description?: string;
   parameters?: unknown;
   // `any` here keeps any zod/JSON-schema-inferred execute signature assignable.
-  execute: (...args: any[]) => unknown;
+  // A raw tool definition exposes `execute`; an already-constructed
+  // `@openai/agents` FunctionTool exposes `invoke` instead. Either is accepted.
+  execute?: (...args: any[]) => unknown;
+  invoke?: (...args: any[]) => unknown;
   [key: string]: unknown;
 }
 
@@ -27,49 +30,90 @@ export interface GuardToolOptions extends GuardOptions {
 }
 
 /**
- * Wraps a single OpenAI Agents SDK tool definition so its `execute` is policy-
- * checked, audited, and (if required) approved. On a block, the model receives
- * a readable message instead of the tool running.
+ * Wraps a single OpenAI Agents SDK tool so it is policy-checked, audited, and
+ * (if required) approved. Works two ways with no extra config:
+ *
+ *  - a raw tool definition (the object you pass to `tool({ ... })`, has
+ *    `execute`) — wrap before `.map(tool)`;
+ *  - an already-constructed `FunctionTool` (the value returned by `tool(...)`,
+ *    has `invoke`) — wrap it directly and drop it straight into `new Agent(...)`.
+ *
+ * On a block, the model receives a readable message instead of the tool running.
  */
 export function guardTool<Def extends OpenAIToolDefinition>(
   def: Def,
   options: GuardToolOptions = {},
 ): Def {
-  if (typeof def.execute !== "function") {
-    throw new Error(`guardTool: tool "${def.name}" has no execute function.`);
-  }
-
   const { upstream = "openai", onBlocked, ...guardOptions } = options;
   const toolName = `${upstream}.${def.name}`;
-  const originalExecute = def.execute;
   const description = guardOptions.description ?? def.description;
   const inputSchema =
     guardOptions.inputSchema ?? inputSchemaFromParameters(def.parameters);
 
-  const wrappedExecute = async (
-    input: unknown,
-    ...rest: unknown[]
-  ): Promise<unknown> => {
-    const result = await guardAction({
+  const runGuard = (
+    args: JsonObject,
+    runOriginal: (finalArgs: JsonObject) => unknown,
+  ) =>
+    guardAction({
       ...guardOptions,
       ...(description !== undefined ? { description } : {}),
       inputSchema,
       tool: toolName,
-      arguments: asArguments(input),
-      execute: () => originalExecute(input, ...rest) as JsonValue,
+      arguments: args,
+      execute: (finalArgs) => runOriginal(finalArgs) as JsonValue,
     });
 
-    if (!result.executed) {
-      return onBlocked ? onBlocked(result, def) : blockedMessage(result);
-    }
+  // Raw tool definition: wrap execute(). Original behavior preserved — the
+  // original input object is passed straight through.
+  if (typeof def.execute === "function") {
+    const originalExecute = def.execute;
+    const wrappedExecute = async (
+      input: unknown,
+      ...rest: unknown[]
+    ): Promise<unknown> => {
+      const result = await runGuard(asArguments(input), () =>
+        originalExecute(input, ...rest),
+      );
+      if (!result.executed) {
+        return onBlocked ? onBlocked(result, def) : blockedMessage(result);
+      }
+      return result.output;
+    };
+    return { ...def, execute: wrappedExecute };
+  }
 
-    return result.output;
-  };
+  // Already-constructed FunctionTool: wrap invoke(runContext, jsonArgsString).
+  // Re-serializing the (possibly approver-edited) arguments keeps edits working.
+  if (typeof def.invoke === "function") {
+    const originalInvoke = def.invoke;
+    const wrappedInvoke = async (
+      runContext: unknown,
+      input: unknown,
+      ...rest: unknown[]
+    ): Promise<unknown> => {
+      const result = await runGuard(argsFromInvokeInput(input), (finalArgs) =>
+        originalInvoke(runContext, serializeInvokeInput(input, finalArgs), ...rest),
+      );
+      if (!result.executed) {
+        return onBlocked ? onBlocked(result, def) : blockedMessage(result);
+      }
+      return result.output;
+    };
+    return { ...def, invoke: wrappedInvoke };
+  }
 
-  return { ...def, execute: wrappedExecute };
+  throw new Error(
+    `guardTool: tool "${def.name}" has neither an execute() nor an invoke() function.`,
+  );
 }
 
-/** Wraps a whole array of tool definitions — use this so coverage is automatic. */
+/**
+ * Wraps a whole array of tools — use this so coverage stays automatic as tools
+ * are added. Accepts raw definitions, already-constructed FunctionTools, or a
+ * mix of both, so it drops into a new or existing agent unchanged:
+ *
+ *   const agent = new Agent({ tools: guardTools(myExistingTools) });
+ */
 export function guardTools<Def extends OpenAIToolDefinition>(
   defs: Def[],
   options: GuardToolOptions = {},
@@ -82,6 +126,38 @@ function asArguments(input: unknown): JsonObject {
     return input as JsonObject;
   }
   return { input: input as JsonValue };
+}
+
+/** FunctionTool.invoke receives the raw JSON-string arguments; parse to an object. */
+function argsFromInvokeInput(input: unknown): JsonObject {
+  if (typeof input === "string") {
+    const trimmed = input.trim();
+    if (!trimmed) {
+      return {};
+    }
+    try {
+      return asArguments(JSON.parse(trimmed));
+    } catch {
+      return { input };
+    }
+  }
+  return asArguments(input);
+}
+
+/**
+ * Re-serialize the final (possibly approver-edited) arguments back into the
+ * shape FunctionTool.invoke expects so edits take effect. Strings round-trip as
+ * JSON; a non-object input we wrapped under `input` is unwrapped on the way out.
+ */
+function serializeInvokeInput(originalInput: unknown, finalArgs: JsonObject): unknown {
+  if (typeof originalInput !== "string") {
+    return finalArgs;
+  }
+  const keys = Object.keys(finalArgs);
+  if (keys.length === 1 && keys[0] === "input") {
+    return JSON.stringify(finalArgs["input"]);
+  }
+  return JSON.stringify(finalArgs);
 }
 
 function blockedMessage(result: GuardActionResult): string {

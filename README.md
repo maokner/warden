@@ -84,6 +84,21 @@ console.log(result.finalOutput);
 
 That is the whole change: move your tool definitions into a raw array, wrap the **whole array** with `guardTools()`, then `.map(tool)`. Wrapping the array (not one tool at a time) is what keeps coverage complete as tools are added.
 
+**Already calling `tool(...)`?** You don't have to refactor anything. `guardTools()` also accepts the `FunctionTool` objects `tool()` returns, so adoption is a one-liner — just wrap the array you already pass to the agent:
+
+```ts
+import { Agent } from "@openai/agents";
+import { configureWarden } from "@maokner/warden";
+import { guardTools } from "@maokner/warden/openai";
+
+configureWarden();
+
+// existingTools is your current array of tool(...) results — unchanged.
+const agent = new Agent({ name: "support", tools: guardTools(existingTools) });
+```
+
+Raw definitions, already-constructed tools, or a mix all work, so you can drop Warden into an existing agent without touching your tool code.
+
 Risky calls pause and ask the approver. Reads run. Credential and financial-looking actions are denied by default. Every decision lands in `.warden/audit.jsonl`.
 
 ## Approvals

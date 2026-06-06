@@ -146,6 +146,86 @@ test("guardTool approves write actions through a callback reviewer", async () =>
   assert.equal(output, "updated");
 });
 
+test("guardTool wraps an already-constructed FunctionTool (invoke) and allows reads", async () => {
+  const config = defaultPolicyConfig();
+  let receivedArgs = "";
+
+  // Shape of the value returned by @openai/agents `tool(...)`.
+  const functionTool = {
+    type: "function" as const,
+    name: "search_orders",
+    description: "Search orders",
+    parameters: { type: "object", properties: { query: { type: "string" } } },
+    invoke: async (_runContext: unknown, input: string) => {
+      receivedArgs = input;
+      return "found";
+    },
+  };
+
+  const guarded = guardTool(functionTool, { config });
+  const output = await guarded.invoke!({}, JSON.stringify({ query: "abc" }));
+
+  assert.equal(output, "found");
+  assert.deepEqual(JSON.parse(receivedArgs), { query: "abc" });
+});
+
+test("guardTool blocks a denied FunctionTool without invoking it", async () => {
+  const config = defaultPolicyConfig();
+  config.defaults.destructive = "deny";
+  let called = false;
+
+  const functionTool = {
+    type: "function" as const,
+    name: "run_sql",
+    description: "Run SQL",
+    invoke: async (_runContext: unknown, _input: string) => {
+      called = true;
+      return "ok";
+    },
+  };
+
+  const guarded = guardTool(functionTool, { config });
+  const output = await guarded.invoke!({}, JSON.stringify({ sql: "drop table users" }));
+
+  assert.equal(called, false);
+  assert.match(String(output), /Warden blocked this action/i);
+});
+
+test("guardTool applies approver-edited arguments to a FunctionTool invoke", async () => {
+  const config = defaultPolicyConfig();
+  let receivedArgs = "";
+
+  const functionTool = {
+    type: "function" as const,
+    name: "update_order",
+    description: "Update an order",
+    invoke: async (_runContext: unknown, input: string) => {
+      receivedArgs = input;
+      return "updated";
+    },
+  };
+
+  const guarded = guardTool(functionTool, {
+    config,
+    reviewer: callbackReviewer(() => ({
+      decision: "edit",
+      approver: "human",
+      editedArguments: { id: 2 },
+    })),
+  });
+
+  const output = await guarded.invoke!({}, JSON.stringify({ id: 1 }));
+  assert.equal(output, "updated");
+  assert.deepEqual(JSON.parse(receivedArgs), { id: 2 });
+});
+
+test("guardTool throws when a tool has neither execute nor invoke", () => {
+  assert.throws(
+    () => guardTool({ name: "broken" } as never),
+    /neither an execute\(\) nor an invoke\(\)/,
+  );
+});
+
 test("guardTools wraps a whole array and honors a custom upstream", async () => {
   const config = defaultPolicyConfig();
 
