@@ -1,127 +1,153 @@
 # Warden
 
-Warden is an action-control layer for AI agents.
+**A local control layer that sits between an AI agent and the tools it can call.**
 
-Agents are quickly gaining the ability to call tools, publish sites, send messages, edit files, update databases, and complete purchases. The problem is no longer only "can we build an agent?" The harder question is "can we trust this agent to act safely in production?"
+Agents can now query databases, send messages, edit files, hit APIs, and move money. Warden inspects every action an agent tries to take and decides — by policy — whether to **allow it, block it, or pause for a human** first. Every decision is written to an audit log.
 
-Warden sits between agents and tools. It classifies tool calls, enforces least-privilege policy, captures audit evidence, and requires human approval for risky actions.
+```
+agent ──▶ warden ──▶ tool / API / database
+            │
+            ├─ classify the action's risk
+            ├─ apply your policy (allow / deny / require approval)
+            ├─ redact secrets from logs
+            └─ record an audit event
+```
 
-## Product Thesis
+## Why
 
-Agent builders will become plentiful and cheap. The durable product opportunity is the trust layer:
+Most teams connecting an agent to real systems can't answer simple questions: *What is this agent allowed to do? Which actions need approval? What exactly ran, and who signed off?* Warden is the boundary that answers them, without rebuilding your agent.
 
-- What is this agent allowed to do?
-- Which actions require approval?
-- Who approved a risky action?
-- What exact tool call ran?
-- What data crossed the boundary?
-- Can we replay or explain the run later?
-- Can we stop a compromised or confused agent before damage happens?
+## How it works
 
-## Initial Wedge
+1. **Classify.** Warden reads each tool call's name, description, schema, arguments, and any SQL, then tags it with risk labels like `read`, `write`, `destructive`, `external_send`, `credential_access`, or `financial`.
+2. **Decide.** Your policy maps each risk to a decision: `allow`, `deny`, `require_approval`, or `redact_then_allow`. Secure defaults ship out of the box — reads are allowed, writes and sends need approval, credential and financial actions are denied.
+3. **Enforce.** Allowed calls run. Denied calls never reach the tool. Approval-required calls pause for a human and fail closed if nobody responds.
+4. **Audit.** Every call produces a JSONL audit event — decision, risk labels, policy rule, arguments (with secrets redacted), result, and duration.
 
-The core product is an action boundary:
+## Install
 
-1. Put Warden between an agent and a protected tool, API, or database.
-2. Warden classifies each action using tool metadata and arguments.
-3. Warden allows, blocks, or asks for approval based on policy.
-4. Warden logs a human-readable audit trail for every action.
-5. Use MCP, the TypeScript SDK, or future adapters to connect different agent stacks.
-
-## Target Users
-
-- Developers building agents with MCP, OpenAI Agents SDK, LangGraph, CrewAI, Cursor, Claude Code, Codex, or internal automation tools.
-- Small teams that want agents to touch real systems without giving them broad unrestricted access.
-- Security and platform teams that need visibility into agent tool usage before agent deployments scale.
-
-## Non-Goals
-
-- Warden is not a generic agent builder.
-- Warden is not a replacement for LangSmith, Langfuse, Braintrust, or Phoenix.
-- Warden is not a generic no-code workflow platform.
-- Warden does not try to judge all model quality. It focuses on action safety, policy enforcement, approvals, and auditability.
-
-## Docs
-
-- [Product Overview](docs/product-overview.md)
-- [Generic Action Boundary](docs/generic-action-boundary.md)
-- [Expected Behavior](docs/expected-behavior.md)
-- [MVP Plan](docs/mvp-plan.md)
-- [Build Plan](docs/build-plan.md)
-- [Implementation Status](docs/implementation-status.md)
-- [MCP Gateway](docs/mcp-gateway.md)
-- [Client Compatibility](docs/client-compatibility.md)
-- [Product Strategy](docs/product-strategy.md)
-- [Security Model](docs/security-model.md)
-- [Approval Workflow](docs/approval-workflow.md)
-
-## Quickstart
+Requires Node.js 22+.
 
 ```bash
 pnpm install
-pnpm test
 pnpm run build
-pnpm run compat:clients
 ```
 
-Try the current policy engine:
+The examples below call `warden`. From a local clone that's `node dist/src/cli/index.js` — run `npm link` to put `warden` on your `PATH`.
 
-```bash
-node dist/src/cli/index.js policy test examples/calls/filesystem-write.json --config examples/policies/warden.yaml
-node dist/src/cli/index.js policy test examples/calls/stripe-refund.json --config examples/policies/warden.yaml --json
-node dist/src/cli/index.js doctor --json
-```
+## Use it
 
-Run the local HTTP decision sidecar for non-TypeScript and non-MCP integrations:
+Warden offers three ways to put a boundary in front of your tools. Pick whichever fits your stack.
 
-```bash
-node dist/src/cli/index.js serve --config examples/policies/warden.yaml --port 8787
-curl -s http://127.0.0.1:8787/v1/decide \
-  -H 'Content-Type: application/json' \
-  -d '{"tool":"database.run_sql","description":"Run SQL against the app database","arguments":{"sql":"select id from users limit 1"}}'
-```
+### 1. In a TypeScript backend
 
-The sidecar returns the policy decision, risk classification, audit event, and `forwardArguments` when the app may execute the action itself.
-
-Use Warden inside an app backend:
+Wrap any function an agent can trigger with `guardAction`:
 
 ```ts
 import { defaultPolicyConfig, guardAction } from "warden";
 
 const policy = defaultPolicyConfig();
-policy.defaults.destructive = "deny";
 
 const result = await guardAction({
   config: policy,
   tool: "database.run_sql",
-  description: "Run SQL against the production application database",
+  description: "Run SQL against the production database",
   arguments: { sql: "drop table users" },
   execute: async (args) => db.query(String(args.sql)),
 });
 
 if (!result.executed) {
-  throw new Error(result.error);
+  throw new Error(result.error); // destructive SQL is denied before db.query runs
 }
 ```
 
-Inspect configured upstream tools before connecting an agent:
+### 2. As an MCP gateway
+
+Add upstream MCP servers to `warden.yaml`, then run Warden as a single MCP server your agent connects to. Warden namespaces and policies every upstream tool, and prompts for risky calls on the terminal.
 
 ```bash
-node dist/src/cli/index.js inspect --config warden.yaml
-node dist/src/cli/index.js inspect --config warden.yaml --json
+warden proxy --config warden.yaml
 ```
 
-Generate client setup snippets:
+Generate the client config snippet:
 
 ```bash
-node dist/src/cli/index.js setup codex --config examples/policies/warden.yaml
-node dist/src/cli/index.js setup claude --config examples/policies/warden.yaml
+warden setup claude --config warden.yaml   # or: warden setup codex
 ```
 
-Run the MCP gateway after adding at least one `upstreams` entry to `warden.yaml`:
+### 3. As a local HTTP sidecar
+
+For non-TypeScript or non-MCP stacks, ask Warden for a decision over localhost:
 
 ```bash
-node dist/src/cli/index.js proxy --config warden.yaml
+warden serve --config warden.yaml --port 8787
+
+curl -s http://127.0.0.1:8787/v1/decide \
+  -H 'Content-Type: application/json' \
+  -d '{"tool":"database.run_sql","arguments":{"sql":"select id from users limit 1"}}'
 ```
 
-`warden proxy` uses stdin/stdout only for MCP protocol traffic. Risky calls that require approval are shown on `/dev/tty` when a terminal is available; non-interactive sessions without that side channel fail closed.
+The response includes the decision, risk classification, an audit event, and `forwardArguments` when your app may execute the action itself.
+
+## Configuration
+
+A policy is a `warden.yaml` file. Generate a starter with `warden init`.
+
+```yaml
+defaults:            # decision per risk label
+  read: allow
+  write: require_approval
+  destructive: require_approval
+  credential_access: deny
+  financial: deny
+
+tools:               # override decisions for specific tools
+  filesystem.read_file:
+    decision: allow
+  filesystem.delete_file:
+    decision: deny
+
+redaction:           # fields scrubbed from audit logs
+  fields: [password, token, api_key, secret]
+
+audit:
+  path: .warden/audit.jsonl
+```
+
+A `deny` from a risk default always wins — a tool-specific rule can't weaken it.
+
+## CLI
+
+```
+warden init [--path warden.yaml] [--template default|database]
+warden policy test <call.json> [--config warden.yaml] [--json]
+warden inspect --config warden.yaml          # list upstream tools + their decisions
+warden proxy --config warden.yaml            # run the MCP gateway
+warden serve --config warden.yaml            # run the HTTP decision sidecar
+warden audit tail [--limit 20] [--json]      # read the audit log
+warden doctor [--config warden.yaml]         # check for ways an agent could bypass Warden
+warden exec --config warden.yaml -- <cmd>    # launch a process with credentials scrubbed
+```
+
+Try it against the included examples:
+
+```bash
+warden policy test examples/calls/stripe-refund.json --config examples/policies/warden.yaml
+```
+
+## What Warden does not do
+
+Warden is a control boundary, not a sandbox. It can only protect a tool when the agent can't also reach that tool directly — with the same credentials, environment variables, network, or shell. `warden doctor` flags those bypass paths, but read the [Security Model](docs/security-model.md) before relying on it for enforcement.
+
+## Documentation
+
+- [Security Model](docs/security-model.md) — what Warden can and cannot guarantee
+- [Approval Workflow](docs/approval-workflow.md) — how human approval works
+- [MCP Gateway](docs/mcp-gateway.md) — supported MCP surface and upstream config
+
+## Development
+
+```bash
+pnpm test        # build + run the test suite
+pnpm typecheck
+```
