@@ -4,14 +4,9 @@
 
 Agents can now query databases, send messages, edit files, hit APIs, and move money. Warden inspects every action an agent tries to take and decides — by policy — whether to **allow it, block it, or pause for a human** first. Every decision is written to an audit log.
 
-```
-agent ──▶ warden ──▶ tool / API / database
-            │
-            ├─ classify the action's risk
-            ├─ apply your policy (allow / deny / require approval)
-            ├─ redact secrets from logs
-            └─ record an audit event
-```
+![Warden action flow](docs/assets/warden-openai-flow.svg)
+
+The fastest path is to wrap the tools your existing app already passes to the OpenAI Agents SDK. Warden then classifies each tool call, applies your policy, asks for Telegram approval when needed, and records an audit event.
 
 ## Why
 
@@ -33,17 +28,19 @@ pnpm install
 pnpm run build
 ```
 
-The examples below call `warden`. From a local clone that's `node dist/src/cli/index.js` — run `npm link` to put `warden` on your `PATH`.
+The examples below call `warden`. From a local clone that's `node dist/src/cli/index.js` — run `npm link` to put the `warden` CLI on your `PATH`. In a consuming app, install from GitHub until the scoped npm package is published.
 
 ## OpenAI Agents SDK in 5 minutes
 
 If you already have an `@openai/agents` app, Warden's fastest path is:
 
 ```bash
-npm install warden
+npm install github:maokner/warden
 warden login --token <telegram-bot-token>
 warden init --template openai
 ```
+
+Do not install the unscoped `warden` package from npm; that name is already used by an unrelated project. The library import path is `@maokner/warden`, and the command name remains `warden`.
 
 Create the Telegram bot with BotFather once. `warden login` prints a `t.me` link; tap Start from the phone that should approve risky agent actions.
 
@@ -52,8 +49,8 @@ Then wrap the tool definitions you already pass to the OpenAI Agents SDK:
 ```ts
 import { Agent, run, tool } from "@openai/agents";
 import { z } from "zod";
-import { configureWarden } from "warden";
-import { guardTools } from "warden/openai";
+import { configureWarden } from "@maokner/warden";
+import { guardTools } from "@maokner/warden/openai";
 
 configureWarden(); // loads warden.yaml and Telegram credentials
 
@@ -91,7 +88,7 @@ Warden also works outside the OpenAI Agents SDK.
 `guard` wraps a single function and returns one with the same signature; it throws if the call is blocked.
 
 ```ts
-import { configureWarden, guard } from "warden";
+import { configureWarden, guard } from "@maokner/warden";
 
 configureWarden();
 
@@ -209,13 +206,16 @@ warden policy test examples/calls/stripe-refund.json --config examples/policies/
 
 ## What Warden does not do
 
-Warden is a control boundary, not a sandbox. It can only protect a tool when the agent can't also reach that tool directly — with the same credentials, environment variables, network, or shell. `warden doctor` flags those bypass paths, but read the [Security Model](docs/security-model.md) before relying on it for enforcement.
+Warden is a control boundary, not a prompt or a general sandbox. It protects actions that are routed through `guardTools`, `guard`, the MCP gateway, or the HTTP sidecar. If your app keeps another unguarded path to the same API, Warden cannot approve or audit that path. Read the [Security Model](docs/security-model.md) before relying on it for enforcement.
 
 ## Documentation
 
-- [Security Model](docs/security-model.md) — what Warden can and cannot guarantee
-- [Approval Workflow](docs/approval-workflow.md) — how human approval works
-- [MCP Gateway](docs/mcp-gateway.md) — supported MCP surface and upstream config
+- [Documentation index](docs/README.md) - all guides and references
+- [OpenAI Agents SDK quickstart](docs/openai-quickstart.md) - add Warden to an existing app
+- [Migrating existing agents](docs/migrating-existing-agents.md) - wrap old tool arrays safely
+- [How Warden works](docs/how-warden-works.md) - classifier, policy, approval, audit
+- [Integration surfaces](docs/integration-surfaces.md) - OpenAI tools, generic guard, MCP, HTTP
+- [Security Model](docs/security-model.md) - what Warden can and cannot guarantee
 
 ## Development
 

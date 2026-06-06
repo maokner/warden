@@ -1,5 +1,5 @@
 {
-  "name": "warden",
+  "name": "@maokner/warden",
   "version": "0.1.0",
   "description": "A local action-control layer for AI agents.",
   "type": "module",
@@ -14,6 +14,12 @@
     }
   },
   "types": "./dist/src/index.d.ts",
+  "files": [
+    "dist/src",
+    "docs",
+    "examples",
+    "README.md"
+  ],
   "bin": {
     "warden": "./dist/src/cli/index.js"
   },

@@ -1,4 +1,4 @@
-import { defaultPolicyConfig, guardAction, type JsonValue } from "warden";
+import { defaultPolicyConfig, guardAction, type JsonValue } from "@maokner/warden";
 
 interface Database {
   query: (sql: string) => Promise<JsonValue>;

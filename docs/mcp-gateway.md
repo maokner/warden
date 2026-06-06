@@ -1,6 +1,8 @@
 # MCP Gateway
 
-Warden now includes a minimal stdio MCP gateway.
+Warden includes a minimal stdio MCP gateway for app-built agents that use MCP tools. The gateway presents one Warden MCP server to the agent, namespaces upstream tools, and runs every `tools/call` through the same classifier, policy, approval, and audit pipeline used by the OpenAI SDK wrapper.
+
+![Warden integration surfaces](assets/warden-integration-surfaces.svg)
 
 ## Supported MCP Surface
 

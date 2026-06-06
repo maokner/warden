@@ -1,261 +1,146 @@
 # Security Model
 
-## Core Security Claim
+Warden is an action-control boundary for app-built agents.
 
-Warden can prevent agent bypass only when it controls the credentials, network path, and tool boundary.
+It is meant for agents you build into products, internal tools, support workflows, operations dashboards, and backend apps. The primary case is not a coding agent editing a repository; it is an application agent that can call functions, MCP tools, or APIs with real side effects.
 
-Warden cannot reliably protect an upstream tool if the agent can also reach that tool directly with the same user's credentials, environment variables, browser session, shell access, or MCP configuration.
+![Warden integration surfaces](assets/warden-integration-surfaces.svg)
 
-This must be explicit in the product. Warden is not a prompt-level safety layer. It is a control boundary.
+## Core Claim
 
-## Threat Model
+Warden can control an action when that action is routed through Warden before it reaches the real executor.
 
-Assume a coding agent may be able to:
+Examples:
 
-- read and edit files in the project
-- modify MCP client configuration files
-- run shell commands
-- install packages
-- call external APIs over the network
-- inspect environment variables
-- read local config files
-- generate code that bypasses Warden at runtime
-- modify tests, scripts, or deployment config
-- attempt to hide direct API usage in code changes
+- `guardTools()` wraps OpenAI Agents SDK function tools before `execute` runs.
+- `guard()` wraps a side-effecting JavaScript function.
+- `warden proxy` sits in front of upstream MCP tools.
+- `warden serve` lets a non-TypeScript app ask for a decision before it acts.
 
-Warden should treat the agent as an untrusted writer inside the workspace.
+Warden cannot control a second path that bypasses it. If your app still calls Stripe, Slack, SendGrid, a database, or an internal API directly from another unguarded path, Warden cannot approve or audit that path.
+
+## Threat Model For App-Built Agents
+
+Assume an agent may:
+
+- choose the wrong tool for the user's request
+- overfill tool arguments
+- send messages to the wrong recipient
+- update the wrong record
+- call a tool based on stale or incomplete context
+- expose sensitive arguments in logs or responses
+- trigger a third-party API call that cannot be undone
+- repeat an action after a retry or model loop
+
+Warden treats the model's requested action as untrusted until policy allows it or a human approves it.
+
+## What Warden Controls
+
+### Tool Execution
+
+The guarded executor is the only place where a model-requested action can become a side effect.
+
+```text
+model-selected tool call -> Warden decision -> original function or upstream tool
+```
+
+Denied and expired approvals never reach the original function.
+
+### Approval
+
+Risky calls can pause for a human. The OpenAI quickstart uses Telegram polls because they are easy to set up without a Warden-hosted backend.
+
+Approval records include redacted arguments. The original arguments are preserved for execution and audit handling.
+
+### Audit
+
+Every decision creates an audit event with:
+
+- tool name
+- risk labels
+- policy version
+- decision
+- policy rule
+- redacted request arguments
+- execution status
+- error or response summary
+
+The local audit log is useful for development and early deployment. For team production use, stream audit events to an append-only remote store.
+
+### Redaction
+
+Warden redacts configured fields and secret-looking substrings from approval displays and audit logs.
+
+Redaction reduces accidental exposure. It is not a substitute for keeping raw secrets out of agent-accessible arguments.
 
 ## Main Bypass Paths
 
-### Direct MCP Registration
+### Unguarded Functions
 
-The agent edits the MCP client config to add the upstream MCP server directly.
-
-Example risk:
-
-```json
-{
-  "mcpServers": {
-    "github-direct": {
-      "command": "npx",
-      "args": ["@modelcontextprotocol/server-github"]
-    }
-  }
-}
-```
+If the app keeps both guarded and unguarded versions of a side-effect function, the unguarded one can still run.
 
 Control:
 
-- Warden should provide a config scanner that flags direct MCP registrations for protected integrations.
-- Hardened mode should run the agent in an environment where MCP config files are not writable.
-- Team mode should distribute locked MCP configuration through managed device or workspace policy.
+- route side effects through `guardTools`, `guard`, MCP gateway, or sidecar decisions
+- search for direct calls during migration
+- keep risky functions in one module and export only the guarded version
 
-### Direct API Calls
+### Direct API Clients
 
-The agent installs an SDK or writes code that calls GitHub, Slack, Gmail, Stripe, databases, or internal services directly.
-
-Control:
-
-- Do not expose upstream API keys in the agent environment.
-- Restrict network egress from the agent sandbox.
-- Route protected service access through Warden-controlled service accounts.
-- Add code scanning for protected SDKs, hostnames, and env vars.
-
-### Secret Theft
-
-The agent reads `.env`, shell profiles, keychain material, cloud credentials, OAuth tokens, or local app credentials.
+If other app code calls protected APIs directly, Warden will not see those actions.
 
 Control:
 
-- Keep production credentials outside the workspace.
-- Launch the agent with a minimal environment.
-- Use separate OS users or containers for agent execution.
-- Never mount host credential directories into the agent sandbox.
-- Store upstream credentials in Warden, not in the project.
+- wrap service clients with guarded functions
+- put high-risk API calls behind a small service layer
+- add tests that import the guarded service instead of raw SDK clients
 
-### Policy Tampering
+### Overbroad Tools
 
-The agent edits Warden policy files to allow a blocked tool.
+A tool named `execute_action` with a free-form payload is hard to classify and hard to approve safely.
 
 Control:
 
-- Policy files must live outside the agent-writable workspace in hardened mode.
-- Policy versions should be hashed and signed.
-- Every policy change should be auditable.
-- Team policy changes should require human review.
+- split read and write tools
+- give each tool one clear side effect
+- use descriptive names, descriptions, and schemas
+- avoid arbitrary "method" or "operation" arguments for risky tools
 
-### Audit Tampering
+### Missing Identity
 
-The agent deletes or edits local audit logs.
-
-Control:
-
-- Logs should be append-only where possible.
-- Hardened mode should write logs outside the workspace.
-- Team mode should stream audit events to a remote append-only store.
-- Local log gaps should be treated as suspicious.
-
-### Generated Runtime Bypass
-
-The agent writes application code that bypasses Warden after deployment.
+If the app does not pass user, tenant, or run context, audits are less useful.
 
 Control:
 
-- Add CI checks for protected service SDKs, direct API hosts, and sensitive env vars.
-- Require a Warden deployment audit before production deploy.
-- Prefer runtime service credentials that only Warden can use.
-- Use network policy so production apps cannot reach protected services except through approved gateways.
+- pass `user`, `agent`, `runId`, and `callId` where possible
+- keep tenant and actor ids in arguments or metadata when safe
+- add policy rules per tool before relying on broad defaults
 
-## Protection Tiers
+### Local Audit Tampering
 
-### Tier 0: Soft Local Mode
+Local JSONL logs are easy to inspect but not tamper resistant.
 
-Useful for adoption and visibility, but not strong prevention.
+Control:
 
-Capabilities:
+- use local audit during development
+- write audit logs outside writable app workspaces when possible
+- forward audit events to central storage for production
 
-- scan MCP client configs
-- detect direct upstream registrations
-- warn about exposed env vars
-- log all proxied calls
-- provide setup guidance
+## Recommended Production Shape
 
-Limits:
+For a production app-built agent:
 
-- an agent with unrestricted shell, file, credentials, and network access can bypass Warden
+1. Keep Warden policy in source control or managed config.
+2. Initialize Warden once at app startup.
+3. Build agents from guarded tool arrays only.
+4. Route high-risk service calls through guarded functions.
+5. Use Telegram for early human approval, then move to callback approval if you need internal approval UIs or on-call workflows.
+6. Store audit events centrally if approvals affect customers, money, permissions, or external communications.
 
-### Tier 1: Hardened Local Mode
+## What Warden Is Not
 
-Useful for developers who want real local enforcement.
+Warden is not a prompt-level safety instruction. The model does not get to decide whether policy applies.
 
-Capabilities:
+Warden is not a general application firewall. It only controls calls that are routed through it.
 
-- Warden runs outside the project workspace
-- upstream MCP servers are spawned only by Warden
-- upstream credentials live only in Warden's environment or OS credential store
-- agent process receives a minimal environment
-- policy and logs live outside the writable workspace
-- known MCP config paths are read-only or watched
-
-This tier reduces accidental and opportunistic bypass, but host-level access can still be hard to constrain perfectly on a personal machine.
-
-### Tier 2: Sandboxed Agent Mode
-
-The preferred prevention model for coding agents.
-
-Architecture:
-
-```text
-Host Machine
-  |
-  +-- Warden Daemon
-  |     +-- upstream credentials
-  |     +-- upstream MCP servers
-  |     +-- policy
-  |     +-- audit logs
-  |
-  +-- Agent Sandbox
-        +-- project workspace mount
-        +-- Warden MCP endpoint only
-        +-- no upstream credentials
-        +-- restricted network egress
-        +-- no host credential mounts
-```
-
-In this mode, the agent can edit project code, but it cannot directly reach protected tools or credentials.
-
-### Tier 3: Team / Production Mode
-
-The strongest commercial product surface.
-
-Capabilities:
-
-- Warden-hosted or self-hosted gateway
-- service credentials stored only in Warden
-- private network access to upstream systems
-- SSO and role-based policy ownership
-- remote append-only audit storage
-- managed approval workflows
-- deployment checks
-- egress allowlists
-- organization-wide direct-access detection
-
-This is where Warden becomes a real governance product instead of only a developer tool.
-
-## Product Features Needed
-
-### `warden doctor`
-
-Scans the local environment for bypass risks:
-
-- direct MCP configs
-- exposed protected API keys
-- known SDK credentials
-- writable Warden policy files
-- writable audit log paths
-- unrestricted network access warnings
-- risky MCP servers registered outside Warden
-
-### `warden lock`
-
-Creates a hardened local setup:
-
-- moves policy outside the project
-- creates protected audit log directory
-- generates MCP client config that points only to Warden
-- warns about direct upstream credentials
-- optionally sets file permissions where supported
-
-### `warden exec`
-
-Runs an agent command inside a constrained environment:
-
-```bash
-warden exec -- codex
-warden exec -- claude
-warden exec -- cursor-agent
-```
-
-Expected behavior:
-
-- strips protected env vars
-- injects only Warden MCP config
-- sets a clean home/config directory
-- blocks access to host credential paths where possible
-- optionally starts a containerized sandbox
-
-### `warden scan-code`
-
-Scans code changes for generated bypass paths:
-
-- direct calls to protected API hosts
-- imports of protected service SDKs
-- use of protected env vars
-- raw webhook URLs
-- hardcoded tokens
-- suspicious generated MCP config files
-
-This should integrate with pre-commit and CI.
-
-### `warden attest`
-
-Records a signed snapshot of:
-
-- upstream tool inventory
-- policy version
-- Warden version
-- allowed integrations
-- detected direct-access risks
-
-This gives teams evidence that an agent run or deployment used the expected control boundary.
-
-## Default Product Rule
-
-If the user wants enforcement, Warden must own these three things:
-
-1. Credentials
-2. Network access
-3. Policy and audit storage
-
-If any of those are still controlled by the agent, Warden should mark the environment as "monitoring only" instead of "enforced."
-
+Warden is not a complete production governance platform yet. The current package is local-first and developer-friendly; production teams should add central audit storage, managed policy ownership, and deployment checks around it.

@@ -1,5 +1,7 @@
 # Approval Workflow
 
+![Warden action approval flow](assets/warden-openai-flow.svg)
+
 ## Goal
 
 Dangerous agent actions should pause at the boundary, show a human exactly what would happen, and resume only after an explicit decision.
