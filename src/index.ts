@@ -1,6 +1,7 @@
 export * from "./audit/logger.js";
 export * from "./approval/approval.js";
 export * from "./approval/methods.js";
+export * from "./approval/prompt.js";
 export * from "./approval/telegram.js";
 export * from "./telegram/client.js";
 export * from "./telegram/credentials.js";

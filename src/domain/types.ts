@@ -30,7 +30,7 @@ export const DECISION_TYPES = [
 
 export type DecisionType = (typeof DECISION_TYPES)[number];
 
-export const APPROVAL_METHODS = ["deny", "callback", "telegram"] as const;
+export const APPROVAL_METHODS = ["deny", "prompt", "callback", "telegram"] as const;
 export type ApprovalMethod = (typeof APPROVAL_METHODS)[number];
 
 export interface GlobalApprovalConfig {

@@ -33,24 +33,24 @@ There are two ways to adopt Warden.
 
 ## Path 1 — Start a new agent from scratch
 
-`warden init` scaffolds a runnable, already-guarded agent:
+`warden init` scaffolds a runnable, already-guarded agent — no account, bot, or backend required:
 
 ```bash
-warden init                              # writes warden.yaml + agent.ts
-warden login --token <telegram-bot-token>  # pair a phone to approve actions
+warden init                # writes warden.yaml + agent.ts
 export OPENAI_API_KEY=sk-...
-npx tsx agent.ts
+npx tsx agent.ts           # the demo action pauses and asks you to approve in your terminal
 ```
 
-`agent.ts` is a complete OpenAI agent whose tools are wrapped with Warden. The example tool sends an email, which is classified as `external_send` and pauses for approval — so the first run shows you the whole flow. Edit `agent.ts` to add your own tools; coverage stays automatic.
+`agent.ts` is a complete OpenAI agent whose tools are wrapped with Warden. The example tool sends an email, which is classified as `external_send` and pauses for approval — so the first run shows you the whole flow right in the terminal (`Approve this action? [y/N]`). Edit `agent.ts` to add your own tools; coverage stays automatic.
+
+Want to approve from your phone instead of the terminal? Pair a Telegram bot once and flip one line — see [Approvals](#approvals).
 
 ## Path 2 — Add Warden to an existing agent
 
 Generate just the policy, then wrap the tools you already pass to the SDK:
 
 ```bash
-warden init --policy-only                # writes warden.yaml only
-warden login --token <telegram-bot-token>
+warden init --policy-only                # writes warden.yaml only (approvals default to terminal prompt)
 ```
 
 ```ts
@@ -90,7 +90,8 @@ Risky calls pause and ask the approver. Reads run. Credential and financial-look
 
 When a call needs approval, Warden stalls it until the timeout, then fails closed. How a human responds is the `approval.method`:
 
-- **`telegram`** (default) — DMs the approver a poll (✅ Approve / ❌ Deny) with the redacted details; they tap a button on their phone. Link a device once with your own bot (created via @BotFather):
+- **`prompt`** (default) — asks the human right in the terminal (`Approve this action? [y/N]`) with the redacted details. Zero setup, ideal for local development and the first run. Fails closed automatically when there's no interactive terminal (a background or CI run), so it's safe to leave in a starter policy — switch to `telegram` or `callback` before deploying an unattended agent.
+- **`telegram`** — DMs the approver a poll (✅ Approve / ❌ Deny) with the redacted details; they tap a button on their phone. Link a device once with your own bot (created via @BotFather):
   ```bash
   warden login --token <bot-token>   # then tap the printed t.me link to pair
   ```
@@ -126,7 +127,7 @@ redaction:           # fields scrubbed from approval messages + audit logs
   fields: [password, token, api_key, secret]
 
 approval:            # how approval-required actions are handled
-  method: telegram   # deny | callback | telegram
+  method: prompt     # prompt | telegram | callback | deny
   timeout: 5m        # 0s | 30s | 1m | 5m | 30m | 1h
 
 audit:

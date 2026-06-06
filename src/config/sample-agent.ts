@@ -43,7 +43,8 @@ const agent = new Agent({
 });
 
 // Sending an email is classified as external_send, which requires approval.
-// With approval.method: telegram, this pauses and DMs your linked approver.
+// With the default approval.method: prompt, this pauses and asks you to approve
+// right here in your terminal — switch to telegram to approve from your phone.
 const result = await run(agent, "Send Taylor a discount code.");
 console.log(result.finalOutput);
 `;

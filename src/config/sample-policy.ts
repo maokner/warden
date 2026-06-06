@@ -1,13 +1,15 @@
 /**
  * The Warden policy template. `warden init` writes this to warden.yaml.
  *
- * Risky OpenAI Agent tool calls require approval; by default they DM a linked
- * Telegram approver. Switch `approval.method` to `callback` to wire your own
- * verification in code, or `deny` to fail closed with zero setup.
+ * Risky OpenAI Agent tool calls require approval. The default `prompt` method
+ * asks you right in the terminal, so the first run works with zero setup.
+ * Switch `approval.method` to `telegram` to approve from your phone, `callback`
+ * to wire your own UI/Slack/on-call, or `deny` to always fail closed.
  */
 export const WARDEN_POLICY = `# Warden policy for an OpenAI Agents SDK app.
-# Pair a Telegram approver once with:
-#   warden login --token <bot-token>
+# Risky tool calls pause for approval. The default \`prompt\` method asks right
+# here in your terminal — no setup needed. For remote/async approval, run:
+#   warden login --token <bot-token>   # then set approval.method: telegram
 defaults:            # decision per risk label
   read: allow
   write: require_approval
@@ -41,10 +43,10 @@ redaction:           # fields scrubbed from approval messages + audit logs
     - openai_api_key
 
 # How approval-required actions are handled.
-#   method:  deny | callback | telegram
+#   method:  prompt | telegram | callback | deny
 #   timeout: 0s | 30s | 1m | 5m | 30m | 1h
 approval:
-  method: telegram
+  method: prompt
   timeout: 5m
 
 audit:

@@ -25,7 +25,7 @@ test("CLI init scaffolds a policy + runnable agent and refuses accidental overwr
     assert.equal(second, 1);
     assert.equal(existsSync(join(dir, "warden.yaml")), true);
     assert.equal(existsSync(join(dir, "agent.ts")), true);
-    assert.match(readFileSync(join(dir, "warden.yaml"), "utf8"), /method: telegram/);
+    assert.match(readFileSync(join(dir, "warden.yaml"), "utf8"), /method: prompt/);
     assert.match(readFileSync(join(dir, "agent.ts"), "utf8"), /guardTools/);
     assert.match(output.stdout(), /Created .*agent\.ts/);
     assert.match(output.stderr(), /already exists/);
@@ -78,7 +78,7 @@ test("CLI init applies approval method and timeout overrides without touching co
     assert.match(policy, /^\s+method: callback$/m);
     assert.match(policy, /^\s+timeout: 30s$/m);
     // The option comment lines must survive the substitution.
-    assert.match(policy, /#\s+method:\s+deny \| callback \| telegram/);
+    assert.match(policy, /#\s+method:\s+prompt \| telegram \| callback \| deny/);
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }

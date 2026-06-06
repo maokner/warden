@@ -105,16 +105,18 @@ function formatInitResult(paths: string[], policyOnly: boolean): string {
 
   if (policyOnly) {
     lines.push(
-      "  1. warden login --token <telegram-bot-token>   # pair an approver (or set approval.method: callback)",
-      "  2. configureWarden() once at startup, then wrap your tools:",
+      "  1. configureWarden() once at startup, then wrap your tools:",
       "       const tools = guardTools(rawTools).map(tool);",
+      "  Approvals default to `prompt` (approve in your terminal). For phone",
+      "  approval: `warden login --token <bot-token>` + approval.method: telegram.",
     );
   } else {
     lines.push(
       "  1. npm install @openai/agents zod @maokner/warden",
       "  2. export OPENAI_API_KEY=sk-...",
-      "  3. warden login --token <telegram-bot-token>   # pair an approver (or set approval.method: callback)",
-      "  4. npx tsx agent.ts",
+      "  3. npx tsx agent.ts   # the demo action pauses for you to approve in-terminal",
+      "  Want phone approval instead? `warden login --token <bot-token>`,",
+      "  then set approval.method: telegram in warden.yaml.",
     );
   }
 

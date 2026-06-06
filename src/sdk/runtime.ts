@@ -7,6 +7,7 @@ import {
   denyReviewer,
   type ApprovalCallback,
 } from "../approval/methods.js";
+import { promptReviewer } from "../approval/prompt.js";
 import { TelegramApprovalChannel } from "../approval/telegram.js";
 import { TelegramClient, type TelegramClientOptions } from "../telegram/client.js";
 import { loadTelegramCredentials } from "../telegram/credentials.js";
@@ -134,6 +135,10 @@ function resolveChannel(
       return denyChannel();
     }
     return { reviewer: callbackReviewer(onApproval) };
+  }
+
+  if (method === "prompt") {
+    return { reviewer: promptReviewer() };
   }
 
   if (method === "telegram") {
