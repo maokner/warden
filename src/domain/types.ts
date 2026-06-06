@@ -35,7 +35,7 @@ export type EnvironmentStatus =
   | "partially_enforced"
   | "enforced";
 
-export const APPROVAL_METHODS = ["deny", "local", "callback"] as const;
+export const APPROVAL_METHODS = ["deny", "local", "callback", "telegram"] as const;
 export type ApprovalMethod = (typeof APPROVAL_METHODS)[number];
 
 export interface GlobalApprovalConfig {

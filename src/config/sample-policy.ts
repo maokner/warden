@@ -30,7 +30,7 @@ redaction:
     - cookie
 
 # How approval-required actions are handled.
-#   method:  deny | local | callback
+#   method:  deny | local | callback | telegram
 #   timeout: none | 30s | 1m | 5m | 30m | 1h
 approval:
   method: deny
@@ -96,7 +96,7 @@ redaction:
     - uri
 
 # How approval-required actions are handled.
-#   method:  deny | local | callback
+#   method:  deny | local | callback | telegram
 #   timeout: none | 30s | 1m | 5m | 30m | 1h
 approval:
   method: local

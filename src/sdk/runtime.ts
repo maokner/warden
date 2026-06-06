@@ -14,6 +14,9 @@ import {
   DEFAULT_APPROVAL_HOST,
   DEFAULT_APPROVAL_PORT,
 } from "../approval/server.js";
+import { TelegramApprovalChannel } from "../approval/telegram.js";
+import { TelegramClient, type TelegramClientOptions } from "../telegram/client.js";
+import { loadTelegramCredentials } from "../telegram/credentials.js";
 import { loadPolicyConfig } from "../policy/config.js";
 import { defaultPolicyConfig } from "../policy/defaults.js";
 
@@ -27,6 +30,10 @@ export interface ConfigureWardenOptions {
     onApproval?: ApprovalCallback;
     host?: string;
     port?: number;
+    token?: string;
+    chatId?: number;
+    credentialsPath?: string;
+    apiBaseUrl?: string;
   };
 }
 
@@ -57,7 +64,7 @@ export function configureWarden(
   const method = resolveMethod(options, config);
   const channel = resolveChannel(method, options);
 
-  current = {
+  const runtime: WardenRuntime = {
     config,
     auditPath,
     reviewer: channel.reviewer,
@@ -66,13 +73,15 @@ export function configureWarden(
     approvalUrl: channel.approvalUrl,
     close: () => {
       channel.server?.close();
-      if (current && current.server === channel.server) {
+      void channel.telegram?.stop();
+      if (current === runtime) {
         current = undefined;
       }
     },
   };
 
-  return current;
+  current = runtime;
+  return runtime;
 }
 
 export function getWardenRuntime(): WardenRuntime {
@@ -124,6 +133,16 @@ interface ApprovalChannel {
   queue: ApprovalQueue | undefined;
   server: Server | undefined;
   approvalUrl: string | undefined;
+  telegram?: TelegramApprovalChannel;
+}
+
+function denyChannel(): ApprovalChannel {
+  return {
+    reviewer: denyReviewer(),
+    queue: undefined,
+    server: undefined,
+    approvalUrl: undefined,
+  };
 }
 
 function resolveChannel(
@@ -136,7 +155,7 @@ function resolveChannel(
       process.stderr.write(
         "Warden: approval method is `callback` but no onApproval was provided; failing closed (deny).\n",
       );
-      return { reviewer: denyReviewer(), queue: undefined, server: undefined, approvalUrl: undefined };
+      return denyChannel();
     }
     return {
       reviewer: callbackReviewer(onApproval),
@@ -144,6 +163,10 @@ function resolveChannel(
       server: undefined,
       approvalUrl: undefined,
     };
+  }
+
+  if (method === "telegram") {
+    return resolveTelegramChannel(options);
   }
 
   if (method === "local") {
@@ -165,5 +188,36 @@ function resolveChannel(
     };
   }
 
-  return { reviewer: denyReviewer(), queue: undefined, server: undefined, approvalUrl: undefined };
+  return denyChannel();
+}
+
+function resolveTelegramChannel(options: ConfigureWardenOptions): ApprovalChannel {
+  const credentials = loadTelegramCredentials(options.approval?.credentialsPath);
+  const token = options.approval?.token ?? credentials?.token;
+  const chatId = options.approval?.chatId ?? credentials?.chatId;
+
+  if (!token || chatId === undefined) {
+    process.stderr.write(
+      "Warden: approval method is `telegram` but no bot token / chat id is configured (run `warden login`); failing closed (deny).\n",
+    );
+    return denyChannel();
+  }
+
+  const clientOptions: TelegramClientOptions = { token };
+  if (options.approval?.apiBaseUrl) {
+    clientOptions.apiBaseUrl = options.approval.apiBaseUrl;
+  }
+  const channel = new TelegramApprovalChannel({
+    client: new TelegramClient(clientOptions),
+    chatId,
+  });
+  channel.start();
+
+  return {
+    reviewer: channel,
+    queue: undefined,
+    server: undefined,
+    approvalUrl: undefined,
+    telegram: channel,
+  };
 }

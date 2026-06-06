@@ -3,6 +3,7 @@ import {
   mkdtempSync,
   readFileSync,
   rmSync,
+  statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
@@ -16,6 +17,7 @@ import { createApprovalRequest, resolveApproval } from "../src/approval/approval
 import { ApprovalQueue } from "../src/approval/queue.js";
 import { createApprovalServer } from "../src/approval/server.js";
 import { makeToolRef } from "../src/domain/tool-ref.js";
+import { startFakeTelegram } from "./fixtures/fake-telegram.js";
 
 test("CLI init creates a policy and refuses accidental overwrite", async () => {
   const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
@@ -483,6 +485,59 @@ test("CLI approvals lists pending approvals and approve resolves them", async ()
     server.close();
   }
 });
+
+test("CLI login pairs a Telegram device and saves credentials with 0600 perms", async () => {
+  const fake = await startFakeTelegram({ botUsername: "warden_test_bot" });
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const credPath = join(dir, "telegram.json");
+  const output = createOutput();
+
+  try {
+    const loginPromise = runCli(
+      ["login", "--token", "T", "--api-base-url", fake.url, "--credentials", credPath, "--timeout", "10"],
+      { cwd: dir, ...output.io },
+    );
+
+    const code = await waitForMatch(output, /start=([0-9a-f]+)/);
+    fake.enqueueUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        text: `/start ${code}`,
+        chat: { id: 999, type: "private" },
+        from: { id: 5 },
+      },
+    });
+
+    const exit = await loginPromise;
+    assert.equal(exit, 0);
+
+    const creds = JSON.parse(readFileSync(credPath, "utf8")) as {
+      token: string;
+      chatId: number;
+    };
+    assert.equal(creds.token, "T");
+    assert.equal(creds.chatId, 999);
+    assert.equal(statSync(credPath).mode & 0o777, 0o600);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    await fake.close();
+  }
+});
+
+async function waitForMatch(
+  output: { stdout: () => string },
+  pattern: RegExp,
+): Promise<string> {
+  for (let i = 0; i < 400; i += 1) {
+    const match = output.stdout().match(pattern);
+    if (match?.[1]) {
+      return match[1];
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error("pairing link was not printed");
+}
 
 function listenOnPort(server: Server): Promise<number> {
   return new Promise((resolve) => {

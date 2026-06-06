@@ -48,6 +48,13 @@ import {
 import { parseTimeout, TIMEOUT_PRESET_NAMES } from "../approval/methods.js";
 import { APPROVAL_METHODS } from "../domain/types.js";
 import type { PendingApprovalView } from "../approval/queue.js";
+import { randomBytes } from "node:crypto";
+import { TelegramClient, type TelegramClientOptions } from "../telegram/client.js";
+import {
+  defaultTelegramCredentialsPath,
+  saveTelegramCredentials,
+  type TelegramCredentials,
+} from "../telegram/credentials.js";
 
 export interface CliIo {
   cwd: string;
@@ -82,6 +89,8 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
         return await runInspect(rest, io);
       case "setup":
         return runSetup(rest, io);
+      case "login":
+        return await runLogin(rest, io);
       case "serve":
         return await runServe(rest, io);
       case "proxy":
@@ -245,6 +254,93 @@ function runAudit(args: string[], io: CliIo): number {
   }
 
   return 0;
+}
+
+async function runLogin(args: string[], io: CliIo): Promise<number> {
+  const options = parseOptions(args);
+  const token = options.value("--token") ?? process.env["WARDEN_TELEGRAM_TOKEN"];
+  if (!token) {
+    io.stderr(
+      "Usage: warden login --token <bot-token>   (create a bot with @BotFather)\n",
+    );
+    return 1;
+  }
+
+  const credentialsPath = options.value("--credentials");
+  const timeoutRaw = Number(options.value("--timeout") ?? "300");
+  const timeoutSeconds = Number.isFinite(timeoutRaw) && timeoutRaw > 0 ? timeoutRaw : 300;
+
+  const clientOptions: TelegramClientOptions = { token };
+  const apiBaseUrl = options.value("--api-base-url");
+  if (apiBaseUrl) {
+    clientOptions.apiBaseUrl = apiBaseUrl;
+  }
+  const client = new TelegramClient(clientOptions);
+
+  let username: string;
+  try {
+    username = (await client.getMe()).username ?? "your_bot";
+  } catch (error) {
+    io.stderr(
+      `Could not reach Telegram with that token: ${error instanceof Error ? error.message : String(error)}\n`,
+    );
+    return 1;
+  }
+
+  const code = randomBytes(4).toString("hex");
+  io.stdout(
+    `Open this link on the device that should approve actions, then tap Start:\n\n  https://t.me/${username}?start=${code}\n\nWaiting for the bot to be started...\n`,
+  );
+
+  const chatId = await waitForPairing(client, code, timeoutSeconds);
+  if (chatId === undefined) {
+    io.stderr("Timed out waiting for the bot to be started. Run `warden login` again.\n");
+    return 1;
+  }
+
+  await client.sendMessage(
+    chatId,
+    "✅ Warden is now linked to this device. You'll receive approval polls here.",
+  );
+
+  const credentials: TelegramCredentials = { token, chatId };
+  if (username !== "your_bot") {
+    credentials.botUsername = username;
+  }
+  saveTelegramCredentials(credentials, credentialsPath);
+
+  io.stdout(
+    `Linked. Approver chat id ${chatId} saved to ${credentialsPath ?? defaultTelegramCredentialsPath()}.\nSet "approval.method: telegram" in your warden.yaml to use it.\n`,
+  );
+  return 0;
+}
+
+async function waitForPairing(
+  client: TelegramClient,
+  code: string,
+  timeoutSeconds: number,
+): Promise<number | undefined> {
+  const deadline = Date.now() + timeoutSeconds * 1000;
+  let offset: number | undefined;
+
+  while (Date.now() < deadline) {
+    let updates;
+    try {
+      updates = await client.getUpdates({ offset, timeoutSeconds: 5 });
+    } catch {
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      continue;
+    }
+
+    for (const update of updates) {
+      offset = update.update_id + 1;
+      if (update.message?.text?.trim() === `/start ${code}`) {
+        return update.message.chat.id;
+      }
+    }
+  }
+
+  return undefined;
 }
 
 async function runApprovals(args: string[], io: CliIo): Promise<number> {
@@ -883,6 +979,7 @@ Commands:
   warden doctor [--config warden.yaml] [--json]
   warden inspect --config warden.yaml [--json]
   warden setup codex|claude [--config /path/to/warden.yaml]
+  warden login --token <bot-token>             # link a Telegram approver device
   warden serve [--config warden.yaml] [--host 127.0.0.1] [--port 8787]
   warden proxy --config warden.yaml [--approver local_user]
   warden exec [--config warden.yaml] -- <command> [args...]

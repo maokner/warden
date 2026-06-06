@@ -12,6 +12,7 @@ An approval-required call stalls for `approval.timeout` (`none`/`30s`/`1m`/`5m`/
 
 - **`deny`** — never approves; refuse with a clear message. Zero setup, fully fail-closed.
 - **`local`** — an in-process localhost inbox (web page + JSON API) backed by a pending-approval queue. Resolve from the browser or via `warden approvals` / `warden approve <id>` / `warden deny <id>`. The inbox only ever exposes redacted arguments.
+- **`telegram`** — DMs the approver a native poll (✅ Approve / ❌ Deny) with the redacted details and resolves it from the bot's long-poll stream (first vote wins, then the poll is closed). Onboard with `warden login --token <bot-token>`: it prints a `t.me/<bot>?start=<code>` deep link, and tapping Start pairs that device. Bot token + approver chat id are stored 0600 in `~/.warden/telegram.json`, never in `warden.yaml`. You bring your own BotFather bot — no Warden backend.
 - **`callback`** — a function you supply via `configureWarden({ approval: { onApproval } })`, so you can route to your own UI, Slack, or on-call.
 
 `warden proxy` (the MCP gateway) keeps its interactive `/dev/tty` terminal prompt; `approval.method` governs the SDK/`configureWarden` paths. The queue is the core primitive, so notification channels and suspend/resume can be added later without changing policy semantics.

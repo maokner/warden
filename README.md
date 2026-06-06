@@ -149,6 +149,11 @@ When a call needs approval, Warden stalls it until the timeout, then fails close
   warden approvals          # list what's waiting
   warden approve <id>       # or: warden deny <id>
   ```
+- **`telegram`** — DMs the approver a poll (✅ Approve / ❌ Deny) with the redacted details; they tap a button on their phone. Link a device once with your own bot (created via @BotFather):
+  ```bash
+  warden login --token <bot-token>   # then tap the printed t.me link to pair
+  ```
+  The bot token and approver chat id are stored in `~/.warden/telegram.json` (never in `warden.yaml`).
 - **`callback`** — you wire your own UI/Slack/on-call by passing a function:
   ```ts
   configureWarden({ approval: { onApproval: async (req) => ({ decision: "approve", approver: "you" }) } });
@@ -167,6 +172,7 @@ warden proxy --config warden.yaml            # run the MCP gateway
 warden serve --config warden.yaml            # run the HTTP decision sidecar
 warden approvals [--json]                    # list pending approvals (local method)
 warden approve <id> / warden deny <id>       # resolve a pending approval
+warden login --token <bot-token>             # link a Telegram approver device
 warden audit tail [--limit 20] [--json]      # read the audit log
 warden doctor [--config warden.yaml]         # check for ways an agent could bypass Warden
 warden exec --config warden.yaml -- <cmd>    # launch a process with credentials scrubbed
