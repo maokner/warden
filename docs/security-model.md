@@ -43,7 +43,7 @@ Denied and expired approvals never reach the original function.
 
 ### Approval
 
-Risky calls can pause for a human. The OpenAI quickstart uses Telegram polls because they are easy to set up without a Warden-hosted backend.
+Risky calls can pause for a human. The scaffold defaults to the terminal `prompt` method, which needs no account, bot, or backend — ideal for local development. It fails closed when no interactive terminal is attached, so a background or production agent should use `telegram` (a phone poll, no Warden-hosted backend) or `callback` (your own approval UI). All channels fail closed when the approval channel is unavailable.
 
 Approval records include redacted arguments. The original arguments are preserved for execution and audit handling.
 
@@ -129,7 +129,7 @@ For a production app-built agent:
 2. Initialize Warden once at app startup.
 3. Build agents from guarded tool arrays only.
 4. Route high-risk service calls through guarded functions.
-5. Use Telegram for early human approval, then move to callback approval if you need internal approval UIs or on-call workflows.
+5. Use the terminal `prompt` method for local development, then switch to `telegram` or `callback` for any unattended deployment — `prompt` fails closed without a TTY, so it cannot approve anything in a background or production process.
 6. Store audit events centrally if approvals affect customers, money, permissions, or external communications.
 
 ## What Warden Is Not

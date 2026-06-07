@@ -10,11 +10,12 @@ Dangerous agent actions should pause at the boundary, show a human exactly what 
 
 An approval-required call stalls for `approval.timeout` (`0s`/`30s`/`1m`/`5m`/`30m`/`1h`, default `1m`), then fails closed. Use `0s` only when you intentionally want immediate fail-closed behavior. How a human responds is the `approval.method`:
 
-- **`telegram`** (default) — DMs the approver a native poll (✅ Approve / ❌ Deny) with the redacted details and resolves it from the bot's long-poll stream (first vote wins, then the poll is closed). Onboard with `warden login --token <bot-token>`: it prints a `t.me/<bot>?start=<code>` deep link, and tapping Start pairs that device. Bot token + approver chat id are stored `0600` in `~/.warden/telegram.json`, never in `warden.yaml`. You bring your own BotFather bot — there is no Warden backend.
+- **`prompt`** (default) — asks the human right in the terminal (`Approve this action? [y/N]`) with the redacted details, and reads a single y/N answer. Zero setup, ideal for local development and the scaffolded first run. Fails closed automatically when no interactive terminal (TTY) is attached — a background, daemon, or CI run gets a deny instead of a hang — so it is safe to leave in a starter policy. Switch to `telegram` or `callback` before deploying an unattended agent.
+- **`telegram`** — DMs the approver a native poll (✅ Approve / ❌ Deny) with the redacted details and resolves it from the bot's long-poll stream (first vote wins, then the poll is closed). Onboard with `warden login --token <bot-token>`: it prints a `t.me/<bot>?start=<code>` deep link, and tapping Start pairs that device. Bot token + approver chat id are stored `0600` in `~/.warden/telegram.json`, never in `warden.yaml`. You bring your own BotFather bot — there is no Warden backend.
 - **`callback`** — a function you supply via `configureWarden({ approval: { onApproval } })`, so you can route to your own UI, Slack, or on-call. This is the only channel that can **edit-and-approve** or supply a reason.
 - **`deny`** — never approves; refuse with a clear message. Zero setup, fully fail-closed.
 
-Tool-specific `approval.approvers` and `approval.require_reason` are enforced after a reviewer responds. Telegram poll approvals cannot provide a reason, so policies with `require_reason: true` need a `callback` channel.
+Tool-specific `approval.approvers` and `approval.require_reason` are enforced after a reviewer responds. The terminal `prompt` and Telegram polls answer with a simple approve/deny and cannot provide a reason, so policies with `require_reason: true` need a `callback` channel.
 
 ## Decision Types
 
@@ -35,7 +36,7 @@ tool call received
   -> classify risk
   -> evaluate policy
   -> create approval request (redacted display arguments)
-  -> notify the human (Telegram poll / your callback)
+  -> notify the human (terminal prompt / Telegram poll / your callback)
   -> human approves, rejects, edits, or the request expires
   -> Warden executes the approved call or returns a rejection
   -> audit event is finalized

@@ -4,9 +4,14 @@ import { configureWarden } from "@maokner/warden";
 import { guardTools } from "@maokner/warden/openai";
 
 // Run once:
-//   warden init --policy-only
-//   warden login --token <telegram-bot-token>
+//   warden init --policy-only        # approvals default to a terminal prompt
+// For phone approval instead, also run:
+//   warden login --token <bot-token> # then set approval.method: telegram
 configureWarden();
+
+// Already have an array of tool(...) results? Skip the raw-array rewrite below
+// and wrap it directly — guardTools() accepts constructed tools too:
+//   const agent = new Agent({ name: "support", tools: guardTools(existingTools) });
 
 const emailClient = {
   send: async (input: {

@@ -4,13 +4,12 @@ import { configureWarden } from "@maokner/warden";
 import { guardTools } from "@maokner/warden/openai";
 
 // A brand-new guarded agent. `warden init` scaffolds this exact file.
-// Run once:
+// Run once (no bot or backend needed — approvals happen in your terminal):
 //   warden init
-//   warden login --token <telegram-bot-token>
 //   export OPENAI_API_KEY=sk-...
 //   npx tsx examples/openai-from-scratch.ts
 
-// Loads warden.yaml + Telegram credentials. Call once at startup.
+// Loads warden.yaml + approval settings. Call once at startup.
 configureWarden();
 
 // Your real side-effecting client goes here (email, billing, CRM, database...).
@@ -46,6 +45,7 @@ const agent = new Agent({
 });
 
 // Sending an email is classified as external_send, which requires approval.
-// With approval.method: telegram, this pauses and DMs your linked approver.
+// With the default approval.method: prompt, this pauses and asks you to approve
+// right here in the terminal — switch to telegram to approve from your phone.
 const result = await run(agent, "Send Taylor a discount code.");
 console.log(result.finalOutput);

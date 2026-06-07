@@ -33,7 +33,7 @@ Warden receives:
 - arguments
 - optional client, agent, user, run, and call ids
 
-For the OpenAI Agents SDK, `guardTools()` reads the same tool definition object you already pass to `tool(...)`.
+For the OpenAI Agents SDK, `guardTools()` reads the same metadata `tool(...)` uses. It accepts either the raw definition object (before `tool()`) or the `FunctionTool` value `tool(...)` returns, so it drops into new or existing agents unchanged.
 
 ### 2. Classify Risk
 
@@ -83,15 +83,15 @@ A default `deny` risk wins over weaker tool-specific rules. A tool override cann
 
 If policy returns `require_approval`, Warden creates an approval request with redacted display arguments.
 
-Telegram approval is the default for the OpenAI quickstart:
+The scaffold defaults to the terminal `prompt` method, which works with zero setup:
 
 ```yaml
 approval:
-  method: telegram
+  method: prompt   # prompt | telegram | callback | deny
   timeout: 5m
 ```
 
-The reviewer sees the tool, risk labels, policy rule, and redacted arguments. If the reviewer approves before timeout, Warden executes the original call. If they deny or do not respond, Warden fails closed.
+The reviewer sees the tool, risk labels, policy rule, and redacted arguments. With `prompt` that appears in the terminal; with `telegram` it is a phone poll; with `callback` it runs your own function. If the reviewer approves before timeout, Warden executes the original call. If they deny, do not respond, or there is no terminal to ask at, Warden fails closed.
 
 ### 5. Execute Or Block
 
@@ -133,10 +133,16 @@ Warden is not a general sandbox. If your app exposes a second unguarded path to 
 
 ## What Makes Adoption Easy
 
-The OpenAI path is designed to preserve your existing app:
+The OpenAI path is designed to preserve your existing app. If you already build tools with `tool(...)`, wrapping the array you pass to the agent is the whole change:
+
+```ts
+const agent = new Agent({ name: "support", tools: guardTools(existingTools) });
+```
+
+Defining tools as raw objects instead? Wrap before `.map(tool)`:
 
 ```ts
 const tools = guardTools(rawTools).map(tool);
 ```
 
-Your agent, prompts, `run(...)` call, schemas, and business functions can stay the same. Warden adds the decision boundary at the last responsible point before side effects happen.
+Either way, your agent, prompts, `run(...)` call, schemas, and business functions stay the same. Warden adds the decision boundary at the last responsible point before side effects happen.

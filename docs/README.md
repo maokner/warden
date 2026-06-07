@@ -13,5 +13,5 @@ Warden is a guardrail for OpenAI agents built with `@openai/agents`. It sits bet
 ## Reference
 
 - [How Warden works](how-warden-works.md) — the classifier, policy engine, approval flow, executor gate, and audit log.
-- [Approval workflow](approval-workflow.md) — Telegram, callback, and deny approval behavior.
+- [Approval workflow](approval-workflow.md) — terminal prompt, Telegram, callback, and deny approval behavior.
 - [Security model](security-model.md) — what Warden can and cannot guarantee.

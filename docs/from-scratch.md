@@ -15,29 +15,43 @@ warden init
 
 `warden init` writes two files:
 
-- `warden.yaml` — your policy (secure defaults; Telegram approval).
+- `warden.yaml` — your policy (secure defaults; terminal-prompt approval).
 - `agent.ts` — a complete, runnable agent whose tools are already wrapped with Warden.
 
 Use `warden init --policy-only` if you only want the policy file.
 
-## 2. Pair an Approver
-
-```bash
-warden login --token <telegram-bot-token>
-```
-
-Create the bot with @BotFather first. `warden login` prints a `t.me` link; open it on the phone that should approve actions and tap **Start**. The bot token and approver chat id are stored in `~/.warden/telegram.json` with `0600` permissions — never in `warden.yaml`.
-
-Prefer to wire your own verification instead of Telegram? Set `approval.method: callback` in `warden.yaml` and pass an `onApproval` function to `configureWarden()`. Set `approval.method: deny` to fail closed with zero setup.
-
-## 3. Run It
+## 2. Run It
 
 ```bash
 export OPENAI_API_KEY=sk-...
 npx tsx agent.ts
 ```
 
-The scaffolded agent has one tool, `send_discount_email`. Sending an email is classified as `external_send`, which requires approval — so the first run pauses and DMs your approver. Approve it and the original `execute` runs; deny it (or let it time out) and the tool never runs.
+No account, bot, or backend required. The scaffolded agent has one tool, `send_discount_email`. Sending an email is classified as `external_send`, which requires approval — so the first run pauses and asks you right in the terminal:
+
+```text
+🛡  Warden — approval needed
+   Tool: openai.send_discount_email
+   Risk: external_send
+   Rule: defaults.external_send
+   Args:
+     { "customerEmail": "taylor@example.com", "discountCode": "SAVE10" }
+Approve this action? [y/N]
+```
+
+Type `y` and the original `execute` runs; type anything else (or let it time out) and the tool never runs. That is the default `prompt` approval method.
+
+## 3. Approve From Your Phone Instead (optional)
+
+The terminal prompt is perfect for local development, but an unattended agent has no terminal to answer at — `prompt` fails closed (deny) when no interactive TTY is present. For remote or async approval, pair a Telegram bot once and switch one line:
+
+```bash
+warden login --token <telegram-bot-token>   # then set approval.method: telegram
+```
+
+Create the bot with @BotFather first. `warden login` prints a `t.me` link; open it on the phone that should approve actions and tap **Start**. The bot token and approver chat id are stored in `~/.warden/telegram.json` with `0600` permissions — never in `warden.yaml`.
+
+Prefer to wire your own verification? Set `approval.method: callback` and pass an `onApproval` function to `configureWarden()`. Set `approval.method: deny` to always fail closed.
 
 ## 4. What the Scaffold Looks Like
 
@@ -47,7 +61,7 @@ import { z } from "zod";
 import { configureWarden } from "@maokner/warden";
 import { guardTools } from "@maokner/warden/openai";
 
-configureWarden(); // loads warden.yaml + Telegram credentials
+configureWarden(); // loads warden.yaml + approval settings
 
 const rawTools = [
   {

@@ -6,9 +6,16 @@ Use this guide when your OpenAI Agents SDK app already works and you want Warden
 
 ## Migration Principle
 
-Do not rewrite the agent first. Move the tool definitions into a raw array, wrap that array with Warden, and keep your existing `execute` functions.
+Do not rewrite the agent first. Wrap the tools the agent already uses with Warden and keep your existing `execute` functions exactly as they are.
 
-The smallest safe migration is:
+The smallest safe migration is one line — `guardTools()` accepts the `tool(...)` objects you already built:
+
+```ts
+configureWarden();
+const agent = new Agent({ name: "support", tools: guardTools(existingTools) });
+```
+
+If you prefer to keep tools as raw definitions, wrap the array and `.map(tool)` instead:
 
 ```ts
 configureWarden();
@@ -35,7 +42,7 @@ List every tool the agent can call and put it in one of these buckets:
 
 If a tool can both read and mutate, split it into two tools before migration. Warden is much easier to reason about when tools have one clear side effect.
 
-## Step 2. Move From Wrapped OpenAI Tools To Raw Tool Definitions
+## Step 2. Wrap The Agent's Tools
 
 Many apps start like this:
 
@@ -48,9 +55,19 @@ const tools = [
     execute: updateTicket,
   }),
 ];
+
+const agent = new Agent({ name: "support", tools });
 ```
 
-Change it to:
+The smallest change wraps that same `tools` array — no other edits:
+
+```ts
+const agent = new Agent({ name: "support", tools: guardTools(tools) });
+```
+
+`guardTools()` detects the already-constructed `FunctionTool` objects and wraps each tool's executor, so Warden classifies and enforces before your `execute` runs.
+
+If you'd rather keep tools as raw definitions (often cleaner for new code), drop the `tool()` calls and wrap before `.map(tool)`:
 
 ```ts
 const rawTools = [
@@ -65,7 +82,7 @@ const rawTools = [
 const tools = guardTools(rawTools).map(tool);
 ```
 
-That keeps the OpenAI Agents SDK shape while giving Warden a chance to classify and enforce before `execute` runs.
+Raw definitions, constructed tools, or a mix all work. Wrap the **whole array** either way so coverage stays automatic as you add tools.
 
 ## Step 3. Configure Warden Once
 
@@ -85,7 +102,6 @@ For most apps, do not pass policy inline. Keep it in `warden.yaml` so operators 
 
 ```bash
 warden init --policy-only
-warden login --token <telegram-bot-token>
 ```
 
 The generated policy is intentionally conservative:
@@ -93,9 +109,9 @@ The generated policy is intentionally conservative:
 - `read: allow`
 - `write`, `external_send`, `network_egress`, `code_execution`: `require_approval`
 - `credential_access`, `financial`: `deny`
-- `approval.method: telegram`
+- `approval.method: prompt`
 
-This is the right starting point for old codebases because it prevents silent side effects while you learn what the agent actually does.
+This is the right starting point for old codebases because it prevents silent side effects while you learn what the agent actually does. Approvals appear in the terminal by default. For a background or production agent, pair Telegram (`warden login --token <bot-token>`) and set `approval.method: telegram`, or use `approval.method: callback` to wire your own approval UI — the terminal `prompt` fails closed when no interactive terminal is attached.
 
 ## Step 5. Keep Tool Metadata Specific
 
@@ -193,11 +209,10 @@ If a side effect lives outside the agent's tool array, expose it to the agent as
 
 ## Migration Checklist
 
-- `warden.yaml` exists and uses `approval.method: telegram`.
-- `warden login` has paired the approver device.
+- `warden.yaml` exists; `approval.method` is `prompt` (local) or `telegram`/`callback` (unattended).
+- For `telegram`, `warden login` has paired the approver device.
 - `configureWarden()` runs before agent construction.
-- Existing tool definitions live in `rawTools`.
-- The OpenAI agent receives `guardTools(rawTools).map(tool)`.
+- The agent's tools are wrapped — `guardTools(existingTools)`, or `guardTools(rawTools).map(tool)` for raw definitions.
 - No unguarded tool array is still passed to an agent.
-- Risky tools produce Telegram approval requests.
+- Risky tools pause for approval (terminal prompt by default).
 - Audit events appear in `.warden/audit.jsonl`.
