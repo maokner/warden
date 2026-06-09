@@ -81,11 +81,21 @@ export class TelegramApprovalChannel implements ApprovalReviewer {
     }
     for (const pending of this.pending.values()) {
       clearTimeout(pending.timer);
+      // Never leave a caller hanging on an unresolved review.
+      pending.resolve({
+        action: "reject",
+        approver: "warden",
+        reason: "Approval channel stopped before a decision arrived.",
+      });
     }
     this.pending.clear();
   }
 
   private async runLoop(): Promise<void> {
+    // getUpdates conflicts (HTTP 409) with a configured webhook; clear any
+    // leftover webhook so a reused bot doesn't silently time out every poll.
+    await this.client.deleteWebhook().catch(() => undefined);
+
     while (this.running) {
       this.controller = new AbortController();
       let updates;
@@ -117,6 +127,13 @@ export class TelegramApprovalChannel implements ApprovalReviewer {
     if (!pending) {
       return;
     }
+
+    // A positive chat id is a private chat with the paired approver — ignore
+    // votes that don't come from that account (and votes with no user at all).
+    if (this.chatId > 0 && answer.user?.id !== this.chatId) {
+      return;
+    }
+
     clearTimeout(pending.timer);
     this.pending.delete(answer.poll_id);
 

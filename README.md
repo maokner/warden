@@ -15,7 +15,7 @@ Most teams connecting an agent to real systems can't answer simple questions: *W
 ## How it works
 
 1. **Classify.** Warden reads each tool call's name, description, schema, and arguments, then tags it with risk labels like `read`, `write`, `destructive`, `external_send`, `credential_access`, or `financial`.
-2. **Decide.** Your policy maps each risk to a decision: `allow`, `deny`, `require_approval`, or `redact_then_allow`. Secure defaults ship out of the box — reads are allowed, writes and sends need approval, credential and financial actions are denied.
+2. **Decide.** Your policy maps each risk to a decision: `allow`, `deny`, `require_approval`, or `redact_then_allow`. Secure defaults ship out of the box — reads are allowed, writes and sends need approval, credential and financial actions are denied. Per-tool argument rules refine this: refunds up to $50 can run unprompted while anything over $500 is refused outright.
 3. **Enforce.** Allowed calls run. Denied calls never reach the tool. Approval-required calls pause for a human and fail closed if nobody responds.
 4. **Audit.** Every call produces a JSONL audit event — decision, risk labels, policy rule, arguments (with secrets redacted), result, and duration.
 
@@ -97,9 +97,9 @@ configureWarden();
 const agent = new Agent({ name: "support", tools: guardTools(existingTools) });
 ```
 
-Raw definitions, already-constructed tools, or a mix all work, so you can drop Warden into an existing agent without touching your tool code.
+Raw definitions, already-constructed tools, or a mix all work, so you can drop Warden into an existing agent without touching your tool code. Hosted tools (web search and friends, which execute on OpenAI's servers) have no local function for Warden to intercept; `guardTools` passes them through unguarded and prints a warning so the gap is visible.
 
-Risky calls pause and ask the approver. Reads run. Credential and financial-looking actions are denied by default. Every decision lands in `.warden/audit.jsonl`.
+Risky calls pause and ask the approver. Reads run. Credential and financial-looking actions are denied by default — so a refund tool like the one above stays blocked until your policy explicitly acknowledges the `financial` risk (see [Configuration](#configuration)). Every decision lands in `.warden/audit.jsonl`.
 
 ## Approvals
 
@@ -137,6 +137,16 @@ tools:               # override decisions for specific tools (namespaced "openai
     decision: allow
   openai.send_invoice_email:
     decision: require_approval
+  openai.issue_refund:
+    acknowledge_risks: [financial]   # explicitly accept the financial deny for this tool
+    decision: require_approval
+    rules:                           # argument conditions, first match wins
+      - when:
+          amount: { lte: 50 }
+        decision: allow              # routine refunds run unprompted
+      - when:
+          amount: { gt: 500 }
+        decision: deny               # large refunds never execute
 
 redaction:           # fields scrubbed from approval messages + audit logs
   fields: [password, token, api_key, secret]
@@ -149,7 +159,9 @@ audit:
   path: .warden/audit.jsonl
 ```
 
-A `deny` from a risk default always wins — a tool-specific rule can't weaken it.
+A `deny` from a risk default always wins — a tool-specific rule can't weaken it. The one explicit escape hatch is `acknowledge_risks`: listing a label there means "this tool is supposed to do that", and the label is floored at `require_approval` instead of denied (it is never silently allowed).
+
+`rules` match on the call's arguments, in order, first match wins; they run after the deny check and before the tool's `decision`. Conditions address arguments by dot path (`customer.email`) and support `eq` (a bare scalar is shorthand), `ne`, `gt`/`gte`/`lt`/`lte`, `in`, `contains`, `matches` (regex), and `exists`. Numeric comparators also catch numeric strings, so `"amount": "900"` still trips `gt: 500`; a missing argument never satisfies a condition. Approver-edited arguments are re-checked against the same rules before executing.
 
 ## CLI
 

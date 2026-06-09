@@ -33,6 +33,17 @@ export function redactArguments(
   return { value, redactedPaths };
 }
 
+/** Field- and pattern-redacts any JSON value (tool outputs, not just args). */
+export function redactJsonValue(value: JsonValue, fields: string[]): JsonValue {
+  const normalizedFields = fields.map(normalizeKey).filter(Boolean);
+  return redactValue(value, normalizedFields, "$", []);
+}
+
+/** Scrubs token-like secrets and key=value secrets from a bare string. */
+export function redactString(value: string): string {
+  return redactSecretSubstrings(value, [], "$");
+}
+
 function redactValue(
   value: JsonValue,
   fields: string[],

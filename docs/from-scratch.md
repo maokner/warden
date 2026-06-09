@@ -113,6 +113,18 @@ tools:
       timeout_seconds: 300
       approvers:
         - alice
+  openai.issue_refund:
+    acknowledge_risks: [financial]   # accept the default financial deny for this tool
+    decision: require_approval
+    rules:                           # argument conditions, first match wins
+      - when:
+          amount: { lte: 50 }
+        decision: allow
+      - when:
+          amount: { gt: 500 }
+        decision: deny
 ```
+
+`acknowledge_risks` is the explicit opt-out for a risk label your tool is supposed to carry (a refund tool is supposed to be `financial`); it floors the default deny at `require_approval`. Argument `rules` then carve out the routine cases that run unprompted and the extreme ones that never run.
 
 Do not add broad `allow` rules for tools that send messages, write records, or call third-party APIs until you know the exact side effect and arguments are safe.

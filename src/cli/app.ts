@@ -59,7 +59,10 @@ export async function runCli(argv: string[], io: CliIo): Promise<number> {
 }
 
 function runInit(args: string[], io: CliIo): number {
-  const options = parseOptions(args);
+  const options = parseOptions(args, {
+    booleanFlags: ["--force", "--policy-only"],
+    valueFlags: ["--path", "--agent", "--approval-method", "--approval-timeout"],
+  });
   const force = options.has("--force");
   const policyOnly = options.has("--policy-only");
 
@@ -157,7 +160,10 @@ function runPolicy(args: string[], io: CliIo): number {
     return 1;
   }
 
-  const options = parseOptions(rest);
+  const options = parseOptions(rest, {
+    booleanFlags: ["--json", "--audit"],
+    valueFlags: ["--config"],
+  });
   const callPath = options.positionals[0];
   if (!callPath) {
     io.stderr("Usage: warden policy test <call.json> [--config warden.yaml] [--json] [--audit]\n");
@@ -173,7 +179,12 @@ function runPolicy(args: string[], io: CliIo): number {
   }
 
   const classification = classifyToolCall(call.metadata, call.arguments);
-  const decision = evaluatePolicy(config, call.ref.fullName, classification);
+  const decision = evaluatePolicy(
+    config,
+    call.ref.fullName,
+    classification,
+    call.arguments,
+  );
   const policyVersion = hashPolicyConfig(config);
 
   if (options.has("--audit")) {
@@ -216,7 +227,10 @@ function runAudit(args: string[], io: CliIo): number {
     return 1;
   }
 
-  const options = parseOptions(rest);
+  const options = parseOptions(rest, {
+    booleanFlags: ["--json"],
+    valueFlags: ["--path", "--limit"],
+  });
   const auditPath = resolve(io.cwd, options.value("--path") ?? ".warden/audit.jsonl");
   const limit = Number(options.value("--limit") ?? "20");
 
@@ -229,7 +243,16 @@ function runAudit(args: string[], io: CliIo): number {
     return 0;
   }
 
-  const events = readAuditEvents(auditPath).slice(-limit);
+  const skippedLines: number[] = [];
+  const events = readAuditEvents(auditPath, (lineNumber) =>
+    skippedLines.push(lineNumber),
+  ).slice(-limit);
+
+  if (skippedLines.length > 0) {
+    io.stderr(
+      `Warning: skipped ${skippedLines.length} malformed audit line(s): ${skippedLines.join(", ")}\n`,
+    );
+  }
   if (options.has("--json")) {
     io.stdout(`${JSON.stringify(events, null, 2)}\n`);
     return 0;
@@ -245,7 +268,9 @@ function runAudit(args: string[], io: CliIo): number {
 }
 
 async function runLogin(args: string[], io: CliIo): Promise<number> {
-  const options = parseOptions(args);
+  const options = parseOptions(args, {
+    valueFlags: ["--token", "--credentials", "--timeout", "--api-base-url"],
+  });
   const token = options.value("--token") ?? process.env["WARDEN_TELEGRAM_TOKEN"];
   if (!token) {
     io.stderr(
@@ -274,6 +299,10 @@ async function runLogin(args: string[], io: CliIo): Promise<number> {
     );
     return 1;
   }
+
+  // A bot with a webhook configured rejects getUpdates with HTTP 409, which
+  // would make the pairing wait below spin until it times out.
+  await client.deleteWebhook().catch(() => undefined);
 
   const code = randomBytes(4).toString("hex");
   io.stdout(
@@ -363,11 +392,26 @@ function formatPolicyTest(
   return `${lines.join("\n")}\n`;
 }
 
-function parseOptions(args: string[]): {
+interface OptionSpec {
+  booleanFlags?: string[];
+  valueFlags?: string[];
+}
+
+/**
+ * Each command declares its flags so a boolean flag can never swallow the
+ * positional that follows it (`warden policy test --json call.json`) and a
+ * typo'd option fails loudly instead of being ignored.
+ */
+function parseOptions(
+  args: string[],
+  spec: OptionSpec = {},
+): {
   positionals: string[];
   has: (name: string) => boolean;
   value: (name: string) => string | undefined;
 } {
+  const booleanFlags = new Set(spec.booleanFlags ?? []);
+  const valueFlags = new Set(spec.valueFlags ?? []);
   const flags = new Set<string>();
   const values = new Map<string, string>();
   const positionals: string[] = [];
@@ -383,13 +427,21 @@ function parseOptions(args: string[]): {
       continue;
     }
 
-    const next = args[index + 1];
-    if (next && !next.startsWith("--")) {
-      values.set(arg, next);
-      index += 1;
-    } else {
+    if (booleanFlags.has(arg)) {
       flags.add(arg);
+      continue;
     }
+
+    if (!valueFlags.has(arg)) {
+      throw new Error(`Unknown option: ${arg}`);
+    }
+
+    const next = args[index + 1];
+    if (next === undefined || next.startsWith("--")) {
+      throw new Error(`${arg} requires a value.`);
+    }
+    values.set(arg, next);
+    index += 1;
   }
 
   return {

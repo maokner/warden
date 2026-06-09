@@ -25,7 +25,6 @@ export const DECISION_TYPES = [
   "deny",
   "require_approval",
   "redact_then_allow",
-  "transform_then_allow",
 ] as const;
 
 export type DecisionType = (typeof DECISION_TYPES)[number];
@@ -73,9 +72,43 @@ export interface ApprovalPolicy {
   requireReason?: boolean;
 }
 
+/**
+ * One condition on one argument, addressed by dot path. All matchers present
+ * in the object must hold. Numeric comparators coerce numeric strings so a
+ * model emitting `"amount": "900"` cannot slip past a threshold.
+ */
+export interface ArgumentMatcher {
+  eq?: JsonPrimitive;
+  ne?: JsonPrimitive;
+  gt?: number;
+  gte?: number;
+  lt?: number;
+  lte?: number;
+  in?: JsonPrimitive[];
+  contains?: JsonPrimitive;
+  matches?: string;
+  exists?: boolean;
+}
+
+/**
+ * An ordered argument-condition rule: when every matcher in `when` holds for
+ * the call's arguments, the rule's decision applies. First match wins.
+ */
+export interface ToolRule {
+  when: Record<string, ArgumentMatcher>;
+  decision: DecisionType;
+}
+
 export interface ToolPolicy {
   decision?: DecisionType;
   risks?: RiskLabel[];
+  /**
+   * Risk labels whose default `deny` this tool explicitly accepts. An
+   * acknowledged label no longer auto-denies the tool; it is floored at
+   * `require_approval` unless the tool sets an explicit decision or rule.
+   */
+  acknowledgeRisks?: RiskLabel[];
+  rules?: ToolRule[];
   approval?: ApprovalPolicy;
 }
 

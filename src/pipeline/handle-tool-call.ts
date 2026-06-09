@@ -64,6 +64,7 @@ export async function handleToolCall(
     input.config,
     input.call.ref.fullName,
     classification,
+    input.call.arguments,
   );
   const policyVersion = hashPolicyConfig(input.config);
   const start = Date.now();
@@ -107,11 +108,26 @@ export async function handleToolCall(
 
     const approvalRequest = createApprovalRequest(approvalInput);
     const approvalOptions = input.now ? { now: input.now } : {};
-    const approval = await resolveApproval(
-      approvalRequest,
-      input.reviewer,
-      approvalOptions,
-    );
+
+    // A broken approval channel (network error, throwing callback) must fail
+    // closed and still produce an audit event — never escape as an exception.
+    let approval: ApprovalResolution;
+    try {
+      approval = await resolveApproval(
+        approvalRequest,
+        input.reviewer,
+        approvalOptions,
+      );
+    } catch (error) {
+      approval = {
+        status: "failed",
+        decidedAt: new Date().toISOString(),
+        originalArguments: structuredClone(input.call.arguments),
+        reason: `Approval channel error: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      };
+    }
 
     if (
       approval.status !== "approved" &&
@@ -126,7 +142,9 @@ export async function handleToolCall(
         approvalId: approvalRequest.id,
         executed: false,
         responseStatus: "not_executed",
-        error: `Approval ${approval.status}.`,
+        error: approval.reason
+          ? `Approval ${approval.status}. ${approval.reason}`
+          : `Approval ${approval.status}.`,
         durationMs: Date.now() - start,
       });
     }
@@ -157,6 +175,7 @@ export async function handleToolCall(
         input.config,
         input.call.ref.fullName,
         editedClassification,
+        executionArgs,
       );
 
       if (editedDecision.decision === "deny") {
@@ -184,20 +203,6 @@ export async function handleToolCall(
       approvalId: approvalRequest.id,
       executionArgs,
       start,
-    });
-  }
-
-  if (decision.decision === "transform_then_allow") {
-    return finalize({
-      input,
-      classification,
-      decision,
-      policyVersion,
-      executed: false,
-      responseStatus: "not_executed",
-      error:
-        "transform_then_allow is not implemented; refusing to execute original arguments.",
-      durationMs: Date.now() - start,
     });
   }
 

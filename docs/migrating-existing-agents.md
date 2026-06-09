@@ -187,9 +187,20 @@ tools:
     approval:
       approvers:
         - support-lead
+
+  openai.issue_refund:
+    acknowledge_risks: [financial]   # this tool is supposed to move money
+    decision: require_approval
+    rules:                           # argument conditions, first match wins
+      - when:
+          amount: { lte: 50 }
+        decision: allow
+      - when:
+          amount: { gt: 500 }
+        decision: deny
 ```
 
-A tool-specific `allow` cannot override a default `deny` for credential or financial risks. That is deliberate.
+A tool-specific `allow` cannot override a default `deny` for credential or financial risks. That is deliberate. The explicit opt-out is `acknowledge_risks`: a tool that is *supposed* to carry a denied risk (a refund tool is supposed to be `financial`) lists the label, which floors it at `require_approval` instead — and argument `rules` can then carve out the routine cases that run unprompted and the extreme ones that never run.
 
 ## Step 8. Remove Unguarded Paths
 

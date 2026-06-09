@@ -59,6 +59,39 @@ test("promptReviewer fails closed when no TTY is attached", async () => {
   assert.match(action.reason ?? "", /TTY/);
 });
 
+test("promptReviewer serializes concurrent approval prompts", async () => {
+  const input = tty();
+  const output = new PassThrough();
+  let printed = "";
+  output.on("data", (chunk) => {
+    printed += String(chunk);
+  });
+  const prompts = (): number => printed.split("Approve this action?").length - 1;
+  const waitFor = async (predicate: () => boolean): Promise<void> => {
+    for (let i = 0; i < 200 && !predicate(); i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+    }
+  };
+
+  const reviewer = promptReviewer({ input, output, approver: "tester" });
+  const first = reviewer.review(makeRequest());
+  const second = reviewer.review(makeRequest());
+
+  await waitFor(() => prompts() === 1);
+  assert.equal(prompts(), 1);
+
+  input.write("y\n");
+  const firstAction = await first;
+  assert.equal(firstAction.action, "approve");
+
+  await waitFor(() => prompts() === 2);
+  assert.equal(prompts(), 2);
+
+  input.write("n\n");
+  const secondAction = await second;
+  assert.equal(secondAction.action, "reject");
+});
+
 test("promptReviewer shows the redacted tool and risk in the prompt", async () => {
   const input = tty();
   const output = new PassThrough();

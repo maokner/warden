@@ -27,7 +27,7 @@ export const DEFAULT_REDACTION_FIELDS = [
 
 export const DEFAULT_AUDIT_PATH = ".warden/audit.jsonl";
 
-export const DEFAULT_APPROVAL_TIMEOUT_SECONDS = 60;
+export const DEFAULT_APPROVAL_TIMEOUT_SECONDS = 300;
 
 export function defaultPolicyConfig(): PolicyConfig {
   return {
@@ -38,7 +38,9 @@ export function defaultPolicyConfig(): PolicyConfig {
     },
     auditPath: DEFAULT_AUDIT_PATH,
     approval: {
-      method: "deny",
+      // Matches the documented default: ask at the terminal. promptReviewer
+      // fails closed on its own when no interactive TTY is attached.
+      method: "prompt",
       timeoutSeconds: DEFAULT_APPROVAL_TIMEOUT_SECONDS,
     },
   };

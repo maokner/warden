@@ -90,6 +90,16 @@ Control:
 - put high-risk API calls behind a small service layer
 - add tests that import the guarded service instead of raw SDK clients
 
+### Hosted Tools
+
+OpenAI-hosted tools (web search, computer use, server-side MCP tools) execute on OpenAI's infrastructure. There is no local `execute`/`invoke` for Warden to wrap, so `guardTools` passes them through unguarded and prints a warning rather than crashing the agent.
+
+Control:
+
+- treat every hosted tool in the array as outside the boundary
+- prefer local function tools for side effects you need policy over
+- watch for the pass-through warning in logs when tool arrays change
+
 ### Overbroad Tools
 
 A tool named `execute_action` with a free-form payload is hard to classify and hard to approve safely.

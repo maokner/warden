@@ -1,18 +1,19 @@
 import type {
   Classification,
   DecisionType,
+  JsonObject,
   PolicyConfig,
   PolicyDecision,
   RiskLabel,
   ToolPolicy,
 } from "../domain/types.js";
+import { matchRules } from "./rules.js";
 
 const DECISION_SEVERITY: Record<DecisionType, number> = {
   allow: 0,
   redact_then_allow: 1,
-  transform_then_allow: 2,
-  require_approval: 3,
-  deny: 4,
+  require_approval: 2,
+  deny: 3,
 };
 
 const RISK_ORDER: RiskLabel[] = [
@@ -29,26 +30,44 @@ const RISK_ORDER: RiskLabel[] = [
   "unknown",
 ];
 
+/**
+ * Precedence: a `deny` from a risk default always wins unless the tool policy
+ * explicitly lists that risk in `acknowledge_risks` (which floors it at
+ * `require_approval` instead). Then the tool's argument rules (first match
+ * wins), then the tool decision, then the strongest risk default.
+ */
 export function evaluatePolicy(
   config: PolicyConfig,
   toolName: string,
   classification: Classification,
+  args: JsonObject = {},
 ): PolicyDecision {
   const toolPolicy = config.tools[toolName];
   const riskLabels = mergeRiskLabels(classification.labels, toolPolicy);
-  const strongestRiskDecision = strongestDecisionForRisks(config, riskLabels);
+  const acknowledged = new Set<RiskLabel>(toolPolicy?.acknowledgeRisks ?? []);
+  const strongest = strongestDecisionForRisks(config, riskLabels, acknowledged);
 
-  if (
-    strongestRiskDecision.decision === "deny" &&
-    toolPolicy?.decision !== "deny"
-  ) {
+  if (strongest.decision === "deny" && toolPolicy?.decision !== "deny") {
     return buildDecision(
       "deny",
-      `defaults.${strongestRiskDecision.risk}`,
-      `${strongestRiskDecision.risk} -> deny`,
+      `defaults.${strongest.risk}`,
+      `${strongest.risk} -> deny`,
       riskLabels,
       toolPolicy,
     );
+  }
+
+  if (toolPolicy?.rules) {
+    const match = matchRules(toolPolicy.rules, args);
+    if (match) {
+      return buildDecision(
+        match.rule.decision,
+        `tools.${toolName}.rules[${match.index}]`,
+        `Rule matched: ${match.description}.`,
+        riskLabels,
+        toolPolicy,
+      );
+    }
   }
 
   if (toolPolicy?.decision) {
@@ -62,9 +81,11 @@ export function evaluatePolicy(
   }
 
   return buildDecision(
-    strongestRiskDecision.decision,
-    `defaults.${strongestRiskDecision.risk}`,
-    `${strongestRiskDecision.risk} -> ${strongestRiskDecision.decision}`,
+    strongest.decision,
+    `defaults.${strongest.risk}`,
+    strongest.acknowledgedDeny
+      ? `${strongest.risk} -> require_approval (deny acknowledged by acknowledge_risks)`
+      : `${strongest.risk} -> ${strongest.decision}`,
     riskLabels,
     toolPolicy,
   );
@@ -73,11 +94,18 @@ export function evaluatePolicy(
 function strongestDecisionForRisks(
   config: PolicyConfig,
   riskLabels: RiskLabel[],
-): { risk: RiskLabel; decision: DecisionType } {
-  const decisions = riskLabels.map((risk) => ({
-    risk,
-    decision: config.defaults[risk],
-  }));
+  acknowledged: Set<RiskLabel>,
+): { risk: RiskLabel; decision: DecisionType; acknowledgedDeny: boolean } {
+  const decisions = riskLabels.map((risk) => {
+    const configured = config.defaults[risk];
+    const acknowledgedDeny = configured === "deny" && acknowledged.has(risk);
+
+    return {
+      risk,
+      decision: acknowledgedDeny ? ("require_approval" as DecisionType) : configured,
+      acknowledgedDeny,
+    };
+  });
 
   return decisions.reduce((current, next) => {
     if (DECISION_SEVERITY[next.decision] > DECISION_SEVERITY[current.decision]) {

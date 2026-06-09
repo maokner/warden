@@ -18,6 +18,16 @@ tools:
     decision: require_approval
   filesystem.delete_file:
     decision: deny
+  stripe.create_refund:
+    acknowledge_risks: [financial]   # a refund tool is supposed to be financial
+    decision: require_approval
+    rules:                           # argument conditions, first match wins
+      - when:
+          amount: { lte: 50 }
+        decision: allow
+      - when:
+          amount: { gt: 500 }
+        decision: deny
 
 redaction:
   fields:

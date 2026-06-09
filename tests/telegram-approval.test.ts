@@ -58,7 +58,7 @@ test("Telegram channel approves on the first vote and sends only redacted args",
       poll_answer: {
         poll_id: fake.sentPolls[0]?.pollId,
         option_ids: [0],
-        user: { id: 9, username: "alice" },
+        user: { id: 555, username: "alice" },
       },
     });
 
@@ -86,7 +86,7 @@ test("Telegram channel rejects on a deny vote", async () => {
       poll_answer: {
         poll_id: fake.sentPolls[0]?.pollId,
         option_ids: [1],
-        user: { id: 9 },
+        user: { id: 555 },
       },
     });
 
@@ -105,6 +105,58 @@ test("Telegram channel fails closed when no one votes before the timeout", async
   try {
     const result = await resolveApproval(makeRequest({ sql: "update x" }, 0.2), channel);
     assert.equal(result.status, "expired");
+  } finally {
+    await channel.stop();
+    await fake.close();
+  }
+});
+
+test("Telegram channel ignores votes from accounts other than the paired approver", async () => {
+  const fake = await startFakeTelegram();
+  const channel = makeChannel(fake);
+
+  try {
+    const resolution = resolveApproval(makeRequest({ sql: "update x" }, 0.5), channel);
+    await until(() => fake.sentPolls.length > 0);
+
+    fake.enqueueUpdate({
+      update_id: 1,
+      poll_answer: {
+        poll_id: fake.sentPolls[0]?.pollId,
+        option_ids: [0],
+        user: { id: 9999, username: "mallory" },
+      },
+    });
+
+    const result = await resolution;
+    assert.equal(result.status, "expired");
+  } finally {
+    await channel.stop();
+    await fake.close();
+  }
+});
+
+test("Telegram channel stop() resolves in-flight reviews instead of hanging them", async () => {
+  const fake = await startFakeTelegram();
+  const channel = makeChannel(fake);
+
+  const resolution = resolveApproval(makeRequest({ sql: "update x" }, 60), channel);
+  await until(() => fake.sentPolls.length > 0);
+  await channel.stop();
+
+  const result = await resolution;
+  assert.equal(result.status, "rejected");
+  assert.match(result.reason ?? "", /channel stopped/);
+  await fake.close();
+});
+
+test("Telegram channel clears any leftover webhook before long-polling", async () => {
+  const fake = await startFakeTelegram();
+  const channel = makeChannel(fake);
+
+  try {
+    await until(() => fake.deleteWebhookCalls.length > 0);
+    assert.ok(fake.deleteWebhookCalls.length > 0);
   } finally {
     await channel.stop();
     await fake.close();

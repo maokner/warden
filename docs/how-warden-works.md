@@ -33,7 +33,7 @@ Warden receives:
 - arguments
 - optional client, agent, user, run, and call ids
 
-For the OpenAI Agents SDK, `guardTools()` reads the same metadata `tool(...)` uses. It accepts either the raw definition object (before `tool()`) or the `FunctionTool` value `tool(...)` returns, so it drops into new or existing agents unchanged.
+For the OpenAI Agents SDK, `guardTools()` reads the same metadata `tool(...)` uses. It accepts either the raw definition object (before `tool()`) or the `FunctionTool` value `tool(...)` returns, so it drops into new or existing agents unchanged. Entries with no local `execute()`/`invoke()` — hosted tools like web search, which run on OpenAI's servers — are passed through unguarded with a warning, since there is no local call for Warden to intercept.
 
 ### 2. Classify Risk
 
@@ -54,7 +54,7 @@ The classifier is intentionally conservative. Unknown or vague tools require app
 
 ### 3. Evaluate Policy
 
-Policy maps risk labels and tool names to decisions:
+Policy maps risk labels, tool names, and argument conditions to decisions:
 
 ```yaml
 defaults:
@@ -67,6 +67,16 @@ defaults:
 tools:
   openai.search_orders:
     decision: allow
+  openai.issue_refund:
+    acknowledge_risks: [financial]   # accept the default financial deny for this tool
+    decision: require_approval
+    rules:                           # argument conditions, first match wins
+      - when:
+          amount: { lte: 50 }
+        decision: allow
+      - when:
+          amount: { gt: 500 }
+        decision: deny
 ```
 
 Decision types:
@@ -75,9 +85,15 @@ Decision types:
 - `deny`: never call the underlying tool.
 - `require_approval`: pause and wait for a reviewer.
 - `redact_then_allow`: pass redacted arguments to the tool.
-- `transform_then_allow`: reserved; currently fails closed until transforms are implemented.
 
-A default `deny` risk wins over weaker tool-specific rules. A tool override cannot make credential or financial risks safe by accident.
+Precedence, highest first:
+
+1. A default `deny` for a risk the tool has **not** acknowledged. This always wins — a tool override cannot make credential or financial risks safe by accident. Listing a label under `acknowledge_risks` is the explicit opt-out, and even then the label is floored at `require_approval` unless the tool sets its own decision or a rule matches.
+2. The tool's `rules`, evaluated in order against the call's arguments — the first rule whose every condition holds applies. Conditions address arguments by dot path (`customer.email`) and support `eq` (a bare scalar is shorthand), `ne`, `gt`, `gte`, `lt`, `lte`, `in`, `contains`, `matches` (regex), and `exists`. Numeric comparators coerce numeric strings, so `"amount": "900"` still trips a `gt: 500` rule; everything else only matches when the argument is present with the expected type.
+3. The tool's `decision`.
+4. The strongest decision among the call's risk-label defaults.
+
+Approver-edited arguments are re-classified and re-checked against the same policy (including rules) before they execute.
 
 ### 4. Request Approval
 

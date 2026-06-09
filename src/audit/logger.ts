@@ -9,7 +9,7 @@ import type {
   RiskLabel,
   ToolCall,
 } from "../domain/types.js";
-import { redactArguments } from "../policy/redaction.js";
+import { redactArguments, redactString } from "../policy/redaction.js";
 
 export interface CreateAuditEventInput {
   call: ToolCall;
@@ -56,9 +56,21 @@ export function createAuditEvent(input: CreateAuditEventInput): AuditEvent {
 
   assignOptional(event, "approvalId", input.approvalId);
   assignOptional(event, "executedArguments", executedRedacted?.value);
-  assignOptional(event, "responseSummary", input.responseSummary);
+  // Summaries and errors carry tool output / exception text, which can leak
+  // secrets the argument redaction never sees — scrub token patterns here.
+  assignOptional(
+    event,
+    "responseSummary",
+    input.responseSummary === undefined
+      ? undefined
+      : redactString(input.responseSummary),
+  );
   assignOptional(event, "durationMs", input.durationMs);
-  assignOptional(event, "error", input.error);
+  assignOptional(
+    event,
+    "error",
+    input.error === undefined ? undefined : redactString(input.error),
+  );
 
   return event;
 }
@@ -68,13 +80,31 @@ export function appendAuditEvent(path: string, event: AuditEvent): void {
   writeFileSync(path, `${JSON.stringify(event)}\n`, { flag: "a" });
 }
 
-export function readAuditEvents(path: string): AuditEvent[] {
-  const content = readFileSync(path, "utf8").trim();
-  if (!content) {
-    return [];
-  }
+/**
+ * Reads the JSONL audit log. Lines that fail to parse (a torn write from a
+ * crash mid-append) are skipped and reported through `onSkippedLine` instead
+ * of making the whole log unreadable.
+ */
+export function readAuditEvents(
+  path: string,
+  onSkippedLine?: (lineNumber: number) => void,
+): AuditEvent[] {
+  const content = readFileSync(path, "utf8");
+  const events: AuditEvent[] = [];
 
-  return content.split("\n").map((line) => JSON.parse(line) as AuditEvent);
+  content.split("\n").forEach((line, index) => {
+    if (!line.trim()) {
+      return;
+    }
+
+    try {
+      events.push(JSON.parse(line) as AuditEvent);
+    } catch {
+      onSkippedLine?.(index + 1);
+    }
+  });
+
+  return events;
 }
 
 function assignOptional<K extends keyof AuditEvent>(

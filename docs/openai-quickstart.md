@@ -42,6 +42,8 @@ console.log(result.finalOutput);
 
 That is the whole change. `guardTools()` wraps each tool's executor so it is classified, policy-checked, approved when needed, and audited — your tool code, schemas, prompts, and `run(...)` call stay the same.
 
+Hosted tools (such as `webSearchTool()`) execute on OpenAI's servers, so there is no local function for Warden to intercept; `guardTools` passes them through unguarded and prints a warning so you know they are outside the boundary.
+
 ### Alternative: wrap raw definitions before `tool()`
 
 If you'd rather define tools as plain objects (handy for brand-new code), keep the definitions in an array, wrap it, then `.map(tool)`:
@@ -120,7 +122,19 @@ tools:
       timeout_seconds: 300
       approvers:
         - alice
+  openai.issue_refund:
+    acknowledge_risks: [financial]   # accept the default financial deny for this tool
+    decision: require_approval
+    rules:                           # argument conditions, first match wins
+      - when:
+          amount: { lte: 50 }
+        decision: allow
+      - when:
+          amount: { gt: 500 }
+        decision: deny
 ```
+
+Tools that look financial or credential-shaped are denied outright by default; `acknowledge_risks` is the explicit opt-out and floors them at `require_approval`. Argument `rules` then carve out the routine cases (small refunds run unprompted) and the extreme ones (large refunds never execute).
 
 Do not add broad `allow` rules for tools that send messages, write records, or call third-party APIs until you know the exact side effect and arguments are safe.
 

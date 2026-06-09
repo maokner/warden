@@ -25,11 +25,25 @@ defaults:            # decision per risk label
 
 # Override decisions for specific tools once you see real audit data.
 # Tool names are namespaced "openai.<your_tool_name>".
+#
+# acknowledge_risks lets one tool accept a risk label that is denied by
+# default (it is floored at require_approval, never silently allowed).
+# rules apply argument conditions in order; the first match wins.
+# Matchers: eq (scalar shorthand), ne, gt, gte, lt, lte, in, contains,
+# matches (regex), exists. Conditions inside one rule are ANDed.
 # tools:
 #   openai.search_orders:
 #     decision: allow
-#   openai.send_invoice_email:
+#   openai.issue_refund:
+#     acknowledge_risks: [financial]
 #     decision: require_approval
+#     rules:
+#       - when:
+#           amount: { lte: 50 }
+#         decision: allow
+#       - when:
+#           amount: { gt: 500 }
+#         decision: deny
 
 redaction:           # fields scrubbed from approval messages + audit logs
   fields:

@@ -1,6 +1,28 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { redactArguments } from "../src/policy/redaction.js";
+import {
+  redactArguments,
+  redactJsonValue,
+  redactString,
+} from "../src/policy/redaction.js";
+
+test("redactString scrubs token-like secrets from bare strings", () => {
+  const scrubbed = redactString(
+    "auth Bearer abcdefgh1234 then sk-abcdefghijklmnop and password=hunter2",
+  );
+
+  assert.doesNotMatch(scrubbed, /abcdefgh1234|sk-abcdefghijklmnop|hunter2/);
+  assert.match(scrubbed, /password=\[REDACTED\]/);
+});
+
+test("redactJsonValue field-redacts arbitrary JSON values", () => {
+  const value = redactJsonValue(
+    [{ api_key: "secret", keep: "ok" }, "plain"],
+    ["api_key"],
+  );
+
+  assert.deepEqual(value, [{ api_key: "[REDACTED]", keep: "ok" }, "plain"]);
+});
 
 test("redactArguments redacts nested sensitive fields", () => {
   const input = {

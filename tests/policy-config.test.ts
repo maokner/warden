@@ -97,19 +97,149 @@ approval:
   assert.equal(config.approval.timeoutSeconds, 300);
 });
 
-test("parsePolicyConfig defaults approval to deny with a 60s timeout", () => {
+test("parsePolicyConfig defaults approval to the documented prompt method and 5m timeout", () => {
   const config = parsePolicyConfig(`
 defaults:
   read: allow
 `);
 
-  assert.equal(config.approval.method, "deny");
-  assert.equal(config.approval.timeoutSeconds, 60);
+  assert.equal(config.approval.method, "prompt");
+  assert.equal(config.approval.timeoutSeconds, 300);
 });
 
 test("parsePolicyConfig rejects an invalid approval method", () => {
   assert.throws(
     () => parsePolicyConfig(`approval:\n  method: email\n`),
     /approval\.method/,
+  );
+});
+
+test("parsePolicyConfig rejects unknown keys instead of ignoring them", () => {
+  assert.throws(
+    () => parsePolicyConfig(`upstreams:\n  foo: bar\n`),
+    /policy config has unknown key.*upstreams/,
+  );
+  assert.throws(
+    () => parsePolicyConfig(`approval:\n  metod: prompt\n`),
+    /approval has unknown key.*metod/,
+  );
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+tools:
+  openai.do_thing:
+    decison: allow
+`),
+    /tools\.openai\.do_thing has unknown key.*decison/,
+  );
+});
+
+test("parsePolicyConfig parses acknowledge_risks", () => {
+  const config = parsePolicyConfig(`
+tools:
+  openai.issue_refund:
+    acknowledge_risks: [financial]
+    decision: require_approval
+`);
+
+  assert.deepEqual(config.tools["openai.issue_refund"]?.acknowledgeRisks, [
+    "financial",
+  ]);
+
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+tools:
+  openai.issue_refund:
+    acknowledge_risks: [imaginary]
+`),
+    /valid risk label/,
+  );
+});
+
+test("parsePolicyConfig parses argument rules with matchers and shorthand", () => {
+  const config = parsePolicyConfig(`
+tools:
+  openai.issue_refund:
+    decision: require_approval
+    rules:
+      - when:
+          amount: { lte: 50 }
+          currency: usd
+        decision: allow
+      - when:
+          customer.email: { matches: "@example\\\\.com$" }
+        decision: require_approval
+`);
+
+  const rules = config.tools["openai.issue_refund"]?.rules;
+  assert.equal(rules?.length, 2);
+  assert.deepEqual(rules?.[0], {
+    when: { amount: { lte: 50 }, currency: { eq: "usd" } },
+    decision: "allow",
+  });
+  assert.deepEqual(rules?.[1], {
+    when: { "customer.email": { matches: "@example\\.com$" } },
+    decision: "require_approval",
+  });
+});
+
+test("parsePolicyConfig rejects malformed rules", () => {
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+tools:
+  openai.t:
+    rules:
+      - decision: allow
+`),
+    /when is required/,
+  );
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+tools:
+  openai.t:
+    rules:
+      - when: {}
+        decision: allow
+`),
+    /at least one condition/,
+  );
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+tools:
+  openai.t:
+    rules:
+      - when:
+          amount: { gt: high }
+        decision: allow
+`),
+    /gt must be a finite number/,
+  );
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+tools:
+  openai.t:
+    rules:
+      - when:
+          amount: { near: 50 }
+        decision: allow
+`),
+    /unknown key.*near/,
+  );
+  assert.throws(
+    () =>
+      parsePolicyConfig(`
+tools:
+  openai.t:
+    rules:
+      - when:
+          note: { matches: "(" }
+        decision: allow
+`),
+    /not a valid regular expression/,
   );
 });

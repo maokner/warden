@@ -8,7 +8,7 @@ Dangerous agent actions should pause at the boundary, show a human exactly what 
 
 ## What's Implemented Today
 
-An approval-required call stalls for `approval.timeout` (`0s`/`30s`/`1m`/`5m`/`30m`/`1h`, default `1m`), then fails closed. Use `0s` only when you intentionally want immediate fail-closed behavior. How a human responds is the `approval.method`:
+An approval-required call stalls for `approval.timeout` (`0s`/`30s`/`1m`/`5m`/`30m`/`1h`, default `5m`), then fails closed. Use `0s` only when you intentionally want immediate fail-closed behavior. How a human responds is the `approval.method`:
 
 - **`prompt`** (default) — asks the human right in the terminal (`Approve this action? [y/N]`) with the redacted details, and reads a single y/N answer. Zero setup, ideal for local development and the scaffolded first run. Fails closed automatically when no interactive terminal (TTY) is attached — a background, daemon, or CI run gets a deny instead of a hang — so it is safe to leave in a starter policy. Switch to `telegram` or `callback` before deploying an unattended agent.
 - **`telegram`** — DMs the approver a native poll (✅ Approve / ❌ Deny) with the redacted details and resolves it from the bot's long-poll stream (first vote wins, then the poll is closed). Onboard with `warden login --token <bot-token>`: it prints a `t.me/<bot>?start=<code>` deep link, and tapping Start pairs that device. Bot token + approver chat id are stored `0600` in `~/.warden/telegram.json`, never in `warden.yaml`. You bring your own BotFather bot — there is no Warden backend.
@@ -25,7 +25,6 @@ Warden policy can return:
 - `deny`: block immediately
 - `require_approval`: create an approval request and pause the call
 - `redact_then_allow`: redact configured fields and run
-- `transform_then_allow`: reserved; currently fails closed until transforms are implemented
 
 This document focuses on `require_approval`.
 
@@ -102,4 +101,18 @@ Approval audit records include the original request, the redacted display reques
 
 ## Avoiding Approval Fatigue
 
-Reserve approvals for meaningful risk: allow known read-only calls by default, give each tool one clear side effect with a specific name and schema, and add narrow tool-specific rules from repeated approvals once you see real audit data.
+Reserve approvals for meaningful risk: allow known read-only calls by default, give each tool one clear side effect with a specific name and schema, and add narrow tool-specific rules from repeated approvals once you see real audit data. Argument rules carve out the routine cases so only the unusual ones page a human:
+
+```yaml
+tools:
+  openai.issue_refund:
+    acknowledge_risks: [financial]
+    decision: require_approval
+    rules:
+      - when:
+          amount: { lte: 50 }
+        decision: allow        # routine refunds run without a prompt
+      - when:
+          amount: { gt: 500 }
+        decision: deny         # large ones never execute
+```

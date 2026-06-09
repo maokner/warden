@@ -236,21 +236,55 @@ test("handleToolCall forwards redacted arguments for redact_then_allow", async (
   });
 });
 
-test("handleToolCall refuses transform_then_allow until transforms are implemented", async () => {
+test("handleToolCall fails closed and still audits when the approval channel throws", async () => {
   const config = defaultPolicyConfig();
-  config.tools["api.read_payload"] = { decision: "transform_then_allow" };
   const executor = recordingExecutor();
-  const call = callFor("api.read_payload", "Read a payload", {
-    limit: 1000,
+  const reviewer: ApprovalReviewer = {
+    review: async () => {
+      throw new Error("telegram unreachable");
+    },
+  };
+  const call = callFor("filesystem.write_file", "Write a file", {
+    path: "src/config.ts",
+    content: "hello",
   });
 
-  const result = await handleToolCall({ config, call, executor });
+  const result = await handleToolCall({ config, call, executor, reviewer });
 
   assert.equal(result.executed, false);
-  assert.equal(result.decision.decision, "transform_then_allow");
+  assert.equal(result.approval?.status, "failed");
+  assert.match(result.approval?.reason ?? "", /telegram unreachable/);
   assert.equal(executor.calls.length, 0);
-  assert.match(result.error ?? "", /not implemented/);
   assert.equal(result.auditEvent.responseStatus, "not_executed");
+  assert.match(result.auditEvent.error ?? "", /Approval failed/);
+});
+
+test("handleToolCall applies argument rules end to end", async () => {
+  const config = defaultPolicyConfig();
+  config.tools["billing.update_plan"] = {
+    rules: [{ when: { amount: { lte: 50 } }, decision: "allow" }],
+  };
+  const executor = recordingExecutor();
+
+  const small = await handleToolCall({
+    config,
+    call: callFor("billing.update_plan", "Update a plan", { amount: 25 }),
+    executor,
+  });
+
+  assert.equal(small.executed, true);
+  assert.equal(small.decision.decision, "allow");
+  assert.equal(small.decision.rule, "tools.billing.update_plan.rules[0]");
+
+  const large = await handleToolCall({
+    config,
+    call: callFor("billing.update_plan", "Update a plan", { amount: 900 }),
+    executor,
+  });
+
+  assert.equal(large.executed, false);
+  assert.equal(large.decision.decision, "require_approval");
+  assert.equal(large.decision.rule, "defaults.write");
 });
 
 function callFor(tool: string, description: string, args: Record<string, JsonValue>): ToolCall {

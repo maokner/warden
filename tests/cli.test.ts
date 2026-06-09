@@ -175,6 +175,118 @@ test("CLI policy test can write an audit event and audit tail can read it", asyn
   }
 });
 
+test("CLI boolean flags do not swallow the positional that follows them", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    writeFileSync(
+      join(dir, "call.json"),
+      JSON.stringify({
+        tool: "filesystem.read_file",
+        description: "Read a file",
+        arguments: { path: "README.md" },
+      }),
+    );
+
+    const code = await runCli(
+      ["policy", "test", "--json", "call.json"],
+      { cwd: dir, ...output.io },
+    );
+    const result = JSON.parse(output.stdout()) as { decision: { decision: string } };
+
+    assert.equal(code, 0);
+    assert.equal(result.decision.decision, "allow");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI policy test evaluates argument rules against the call's arguments", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    writeFileSync(
+      join(dir, "warden.yaml"),
+      [
+        "tools:",
+        "  stripe.create_refund:",
+        "    acknowledge_risks: [financial]",
+        "    decision: require_approval",
+        "    rules:",
+        "      - when:",
+        "          amount: { gt: 500 }",
+        "        decision: deny",
+        "",
+      ].join("\n"),
+    );
+    writeFileSync(
+      join(dir, "call.json"),
+      JSON.stringify({
+        tool: "stripe.create_refund",
+        description: "Refund a payment",
+        arguments: { payment_intent: "pi_1", amount: 5000 },
+      }),
+    );
+
+    const code = await runCli(
+      ["policy", "test", "call.json", "--json"],
+      { cwd: dir, ...output.io },
+    );
+    const result = JSON.parse(output.stdout()) as {
+      decision: { decision: string; rule: string };
+    };
+
+    assert.equal(code, 0);
+    assert.equal(result.decision.decision, "deny");
+    assert.equal(result.decision.rule, "tools.stripe.create_refund.rules[0]");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CLI rejects unknown options instead of silently ignoring them", async () => {
+  const output = createOutput();
+  const code = await runCli(
+    ["audit", "tail", "--jsno"],
+    { cwd: process.cwd(), ...output.io },
+  );
+
+  assert.equal(code, 1);
+  assert.match(output.stderr(), /Unknown option: --jsno/);
+});
+
+test("CLI audit tail survives a torn audit line and warns about it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "warden-cli-"));
+  const output = createOutput();
+
+  try {
+    const event = JSON.stringify({
+      timestamp: "2026-01-01T00:00:00.000Z",
+      decision: "allow",
+      tool: "openai.search",
+      riskLabels: ["read"],
+      policyRule: "defaults.read",
+    });
+    writeFileSync(
+      join(dir, "audit.jsonl"),
+      `${event}\n{"timestamp":"2026-01-01T00:00:01.000Z","deci`,
+    );
+
+    const code = await runCli(
+      ["audit", "tail", "--path", "audit.jsonl"],
+      { cwd: dir, ...output.io },
+    );
+
+    assert.equal(code, 0);
+    assert.match(output.stdout(), /openai\.search/);
+    assert.match(output.stderr(), /skipped 1 malformed audit line/);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("CLI help lists only the supported commands", async () => {
   const output = createOutput();
   const code = await runCli(["help"], { cwd: process.cwd(), ...output.io });

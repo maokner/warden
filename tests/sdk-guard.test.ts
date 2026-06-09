@@ -37,6 +37,42 @@ test("guardAction allows read-only SQL and executes the database function", asyn
   assert.equal(result.auditEvent.user, "user_123");
 });
 
+test("guardAction field-redacts tool output in the audit summary", async () => {
+  const config = defaultPolicyConfig();
+
+  const result = await guardAction({
+    config,
+    tool: "vault.read_settings",
+    description: "Read application settings",
+    arguments: { name: "smtp" },
+    execute: async () => ({ host: "mail.example.com", password: "hunter2" }),
+  });
+
+  assert.equal(result.executed, true);
+  // The model still gets the real output; only the audit summary is scrubbed.
+  assert.deepEqual(result.output, {
+    host: "mail.example.com",
+    password: "hunter2",
+  });
+  assert.doesNotMatch(result.auditEvent.responseSummary ?? "", /hunter2/);
+  assert.match(result.auditEvent.responseSummary ?? "", /\[REDACTED\]/);
+});
+
+test("guardAction summarizes void tool outputs without failing the call", async () => {
+  const config = defaultPolicyConfig();
+
+  const result = await guardAction({
+    config,
+    tool: "app.list_widgets",
+    description: "List widgets",
+    arguments: {},
+    execute: async () => undefined as never,
+  });
+
+  assert.equal(result.executed, true);
+  assert.equal(result.auditEvent.responseStatus, "success");
+});
+
 test("guardAction fails closed for SQL writes when no reviewer is configured", async () => {
   const config = defaultPolicyConfig();
   let executed = false;

@@ -13,6 +13,7 @@ export * from "./policy/defaults.js";
 export * from "./policy/engine.js";
 export * from "./policy/hash.js";
 export * from "./policy/redaction.js";
+export * from "./policy/rules.js";
 export * from "./pipeline/handle-tool-call.js";
 export * from "./sdk/guard.js";
 export * from "./sdk/runtime.js";

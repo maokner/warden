@@ -14,6 +14,7 @@ export interface FakeTelegram {
     messageId: number;
   }>;
   stopPolls: Array<{ chatId: unknown; messageId: unknown }>;
+  deleteWebhookCalls: number[];
 }
 
 /** A local stand-in for api.telegram.org for tests (matches /bot<token>/<method>). */
@@ -25,6 +26,7 @@ export async function startFakeTelegram(
   const sentMessages: FakeTelegram["sentMessages"] = [];
   const sentPolls: FakeTelegram["sentPolls"] = [];
   const stopPolls: FakeTelegram["stopPolls"] = [];
+  const deleteWebhookCalls: number[] = [];
   let messageIdCounter = 100;
   let pollIdCounter = 0;
 
@@ -47,6 +49,7 @@ export async function startFakeTelegram(
           reply({ ok: true, result: { id: 1, is_bot: true, username: botUsername } });
           return;
         case "deleteWebhook":
+          deleteWebhookCalls.push(Date.now());
           reply({ ok: true, result: true });
           return;
         case "sendMessage":
@@ -98,5 +101,6 @@ export async function startFakeTelegram(
     sentMessages,
     sentPolls,
     stopPolls,
+    deleteWebhookCalls,
   };
 }

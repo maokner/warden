@@ -12,6 +12,7 @@ import {
   type HandleToolCallResult,
   type ToolExecutor,
 } from "../pipeline/handle-tool-call.js";
+import { redactJsonValue } from "../policy/redaction.js";
 import { peekWardenRuntime } from "./runtime.js";
 
 export interface GuardActionInput {
@@ -75,7 +76,11 @@ export async function guardAction(
         return {
           status: "success",
           output,
-          summary: input.summarizeOutput?.(output) ?? summarizeJson(output),
+          // The summary lands in the audit log; field-redact it like the
+          // arguments so secret-bearing outputs don't leak into the JSONL.
+          summary:
+            input.summarizeOutput?.(output) ??
+            summarizeJson(redactJsonValue(output, config.redaction.fields)),
         };
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -111,7 +116,8 @@ function summarizeJson(value: JsonValue): string {
     return value.slice(0, 500);
   }
 
-  return JSON.stringify(value).slice(0, 500);
+  // JSON.stringify returns undefined for undefined (a void tool result).
+  return (JSON.stringify(value) ?? String(value)).slice(0, 500);
 }
 
 function assignIfPresent<T extends object, K extends string, V>(

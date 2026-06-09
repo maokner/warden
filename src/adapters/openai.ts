@@ -63,16 +63,22 @@ export function guardTool<Def extends OpenAIToolDefinition>(
       execute: (finalArgs) => runOriginal(finalArgs) as JsonValue,
     });
 
-  // Raw tool definition: wrap execute(). Original behavior preserved — the
-  // original input object is passed straight through.
+  // Raw tool definition: wrap execute(). When the pipeline leaves the
+  // arguments untouched the original input object is passed straight through;
+  // approver-edited or redacted arguments replace it so what executes is
+  // exactly what the audit log records.
   if (typeof def.execute === "function") {
     const originalExecute = def.execute;
     const wrappedExecute = async (
       input: unknown,
       ...rest: unknown[]
     ): Promise<unknown> => {
-      const result = await runGuard(asArguments(input), () =>
-        originalExecute(input, ...rest),
+      const originalArgs = asArguments(input);
+      const result = await runGuard(originalArgs, (finalArgs) =>
+        originalExecute(
+          restoreExecuteInput(input, originalArgs, finalArgs),
+          ...rest,
+        ),
       );
       if (!result.executed) {
         return onBlocked ? onBlocked(result, def) : blockedMessage(result);
@@ -113,12 +119,32 @@ export function guardTool<Def extends OpenAIToolDefinition>(
  * mix of both, so it drops into a new or existing agent unchanged:
  *
  *   const agent = new Agent({ tools: guardTools(myExistingTools) });
+ *
+ * Entries with no local execute()/invoke() — hosted tools like web search,
+ * which run on OpenAI's servers where Warden cannot intercept them — are
+ * passed through unguarded with a warning instead of crashing the agent.
  */
 export function guardTools<Def extends OpenAIToolDefinition>(
   defs: Def[],
   options: GuardToolOptions = {},
 ): Def[] {
-  return defs.map((def) => guardTool(def, options));
+  return defs.map((def) => {
+    if (typeof def.execute !== "function" && typeof def.invoke !== "function") {
+      process.stderr.write(
+        `Warden: tool "${describeToolDef(def)}" has no local execute()/invoke() (a hosted or non-function tool); passing it through unguarded.\n`,
+      );
+      return def;
+    }
+    return guardTool(def, options);
+  });
+}
+
+function describeToolDef(def: OpenAIToolDefinition): string {
+  if (typeof def.name === "string" && def.name) {
+    return def.name;
+  }
+  const type = def["type"];
+  return typeof type === "string" && type ? type : "unknown";
 }
 
 function asArguments(input: unknown): JsonObject {
@@ -126,6 +152,39 @@ function asArguments(input: unknown): JsonObject {
     return input as JsonObject;
   }
   return { input: input as JsonValue };
+}
+
+/**
+ * Picks what a raw execute() receives. Unchanged arguments pass the original
+ * input through untouched (preserving zod-parsed instances); edited or
+ * redacted arguments replace it. A non-object input that asArguments() wrapped
+ * under `input` is unwrapped on the way out.
+ */
+function restoreExecuteInput(
+  originalInput: unknown,
+  originalArgs: JsonObject,
+  finalArgs: JsonObject,
+): unknown {
+  if (
+    finalArgs === originalArgs ||
+    JSON.stringify(finalArgs) === JSON.stringify(originalArgs)
+  ) {
+    return originalInput;
+  }
+
+  if (
+    originalInput !== null &&
+    typeof originalInput === "object" &&
+    !Array.isArray(originalInput)
+  ) {
+    return finalArgs;
+  }
+
+  const keys = Object.keys(finalArgs);
+  if (keys.length === 1 && keys[0] === "input") {
+    return finalArgs["input"];
+  }
+  return finalArgs;
 }
 
 /** FunctionTool.invoke receives the raw JSON-string arguments; parse to an object. */
